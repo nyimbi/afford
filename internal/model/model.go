@@ -67,8 +67,6 @@ var specs = []FindingSpec{
 		"Another element sits on top of it, or it has no hit area. A real user cannot reach it."},
 	{"E_CONTROL_ERROR", Major, "Control failed to activate",
 		"The click or fill raised in the harness: the element vanished, stayed disabled, or was detached mid-action."},
-	{"E_DISABLED_CONTROL", Info, "Control is disabled",
-		"Recorded for coverage. Disabled controls are not evidence that the underlying action works."},
 	{"E_UNLABELED_CONTROL", Minor, "Form control has no accessible name",
 		"No label, aria-label or aria-labelledby. Screen readers announce it as an unnamed edit field."},
 	{"E_UUID_EXPOSED", Minor, "Internal identifier shown in a dropdown",

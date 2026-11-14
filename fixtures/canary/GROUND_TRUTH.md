@@ -19,12 +19,15 @@ AFFORD_USERNAME=admin AFFORD_PASSWORD=secret \
 |---|---|---|
 | `/` | `<button>Refresh</button>` with no handler | `E_DEAD_CONTROL` |
 | `/` | `<a href="#">` | `E_EMPTY_HREF` |
+| `/` | `target="_blank"` link | `E_NEW_TAB` |
+| `/form-ok` | `<input type="file">` | `E_UNSUPPORTED_INPUT` |
 | `/crash` | async throw after paint | `E_UNCAUGHT` |
 | `/console` | `console.error` on load | `E_CONSOLE_ERROR` |
 | `/overflow` | 1400px block at 1280px viewport | `E_OVERFLOW_X` |
 | `/unlabeled` | text input with no label | `E_UNLABELED_CONTROL` |
 | `/missing` | link to a 404 document | `E_DEAD_LINK` (and `E_HTTP_4XX` on the page) |
 | `/soft-404` | link target answers 200 with "Page not found" | `E_DEAD_LINK` with `soft_404: true` |
+| `/old-route` | linked route redirects to `/dashboard` | `E_NOT_DEEPLINKABLE` |
 | `/dropdown` | option label is a UUID | `E_UUID_EXPOSED` |
 | `/dropdown` | option values are UUIDs | `E_UUID_IN_OPTION_VALUE` |
 | `/dropdown` | enabled select with only a placeholder | `E_EMPTY_SELECT` |

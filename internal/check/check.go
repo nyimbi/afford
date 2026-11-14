@@ -212,6 +212,11 @@ func (c *Checker) Check(ctx context.Context, rawURL string, opts Options) (Resul
 		f := model.NewFinding("E_AUTH_REDIRECT", rawURL)
 		f.Detail["redirected_to"] = result.FinalURL
 		add(f)
+	} else if discover.Template(result.FinalURL) != discover.Template(rawURL) {
+		f := model.NewFinding("E_NOT_DEEPLINKABLE", rawURL)
+		f.Detail["requested"] = rawURL
+		f.Detail["landed"] = result.FinalURL
+		add(f)
 	}
 
 	result.Controls = len(visible)
@@ -283,6 +288,13 @@ func (c *Checker) probeControls(
 		if !el.Visible || el.Disabled || el.IsSubmit() {
 			continue
 		}
+		if el.Type == "file" {
+			f := model.NewFinding("E_UNSUPPORTED_INPUT", rawURL)
+			f.Element = fmt.Sprintf("input “%s”", el.Name)
+			f.Detail["type"] = "file"
+			add(f)
+			continue
+		}
 		if el.Src == "input" && payloads.IsTextLike(el) {
 			continue
 		}
@@ -304,6 +316,12 @@ func (c *Checker) probeControls(
 		obs := probe.ProbeControl(bctx, page, collector, cfg, rawURL, el)
 		pointedTo := el
 		add(oracles.Evaluate(obs, rawURL, "action", &pointedTo)...)
+		if obs.Popups > 0 {
+			f := model.NewFinding("E_NEW_TAB", rawURL)
+			f.Element = fmt.Sprintf("%s “%s”", el.Tag, el.Name)
+			f.Detail["popups"] = obs.Extra["popups"]
+			add(f)
+		}
 	}
 	result.ControlsProbed = probed
 	for kind, n := range destructive {

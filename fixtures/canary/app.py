@@ -24,6 +24,7 @@ NAV = """
   <a href="/broken-api">broken api</a>
   <a href="/missing">missing</a>
   <a href="/soft-404">soft 404</a>
+  <a href="/old-route">old route</a>
   <a href="/dropdown">dropdown</a>
   <a href="/form-ok">valid form</a>
 </nav>
@@ -73,6 +74,7 @@ def index() -> str:
 	<p>This app carries known defects so the crawler can be checked against ground truth.</p>
 	<p><button id="refresh">Refresh</button> — this button has no handler.</p>
 	<p><a href="#">A link that goes nowhere</a></p>
+	<p><a href="/dead" target="_blank">Open the dead page in a new tab</a></p>
 	<ul>
 	  <li>dashboard needs a session</li>
 	  <li>crash throws on load</li>
@@ -224,6 +226,13 @@ def soft_404() -> str:
 	return page("Missing thing", body)
 
 
+@app.get("/old-route")
+def old_route() -> Response:
+	# Planted defect: a linked route redirects somewhere else, so the URL a user
+	# shared does not show the page it names.
+	return RedirectResponse("/dashboard", status_code=302)
+
+
 @app.get("/dropdown", response_class=HTMLResponse)
 def dropdown() -> str:
 	# Three planted defects: a UUID shown as an option label, UUID option values,
@@ -260,6 +269,8 @@ def form_ok() -> str:
 	  <input id="name" name="name" type="text" required>
 	  <label for="mail">Email</label>
 	  <input id="mail" name="email" type="email">
+	  <label for="attachment">Attachment</label>
+	  <input id="attachment" name="attachment" type="file">
 	  <button type="submit">Submit</button>
 	</form>
 	"""

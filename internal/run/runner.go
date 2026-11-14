@@ -36,6 +36,14 @@ type Item struct {
 	Parent string
 }
 
+// found is a URL discovered while visiting a page, with the depth it should be
+// enqueued at. Carrying the depth matters: hardcoding zero made every page
+// depth 0 and disarmed both the depth budget and the deep-link check.
+type found struct {
+	URL   string
+	Depth int
+}
+
 type stats struct {
 	pagesVisited    int
 	pagesFailed     int
@@ -142,7 +150,7 @@ func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary,
 		}
 		var (
 			wg         sync.WaitGroup
-			discovered = make(chan []string, len(frontier))
+			discovered = make(chan []found, len(frontier))
 		)
 		for _, item := range frontier {
 			wg.Add(1)
@@ -158,9 +166,9 @@ func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary,
 		close(discovered)
 
 		var next []Item
-		for urls := range discovered {
-			for _, u := range urls {
-				r.enqueue(&next, u, 0, "", "discovered")
+		for items := range discovered {
+			for _, f := range items {
+				r.enqueue(&next, f.URL, f.Depth, "", "discovered")
 			}
 		}
 		frontier = next
@@ -170,8 +178,9 @@ func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary,
 	return r.summary(), nil
 }
 
-// visit captures one page and returns the URLs it discovered.
-func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []string {
+// visit captures one page and returns the URLs it discovered, at the depth they
+// should be crawled from.
+func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
 	page, collector, err := browser.NewProbePage(bctx)
 	if err != nil {
 		r.bump(r.notTested, "could not open page", 1)
@@ -263,18 +272,27 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []string {
 		r.store.AddFinding(f)
 		return nil
 	}
+	// A discovered link that lands on a different route is not the page it
+	// promised. The seed is exempt: a root that redirects to a dashboard is a
+	// routing decision, not a broken link.
+	if item.Depth > 0 && discover.Template(final) != discover.Template(url) {
+		f := model.NewFinding("E_NOT_DEEPLINKABLE", url)
+		f.Detail["requested"] = url
+		f.Detail["landed"] = final
+		r.store.AddFinding(f)
+	}
 
-	var discovered []string
+	var discovered []found
 	for _, el := range scanResult.Controls {
 		if el.Tag != "a" || !el.Visible {
 			continue
 		}
 		if target := discover.Absolute(final, el.Href); target != "" {
-			discovered = append(discovered, target)
+			discovered = append(discovered, found{URL: target, Depth: item.Depth + 1})
 		}
 	}
 
-	r.probeControls(bctx, page, collector, url, scanResult, &discovered)
+	r.probeControls(bctx, page, collector, url, item.Depth, scanResult, &discovered)
 	r.sweep(page, collector, url, scanResult.Controls)
 	r.probeForms(page, collector, url, scanResult)
 	return discovered
@@ -313,8 +331,9 @@ func (r *Runner) probeControls(
 	page playwright.Page,
 	collector *browser.Collector,
 	url string,
+	depth int,
 	scanResult model.ScanResult,
-	discovered *[]string,
+	discovered *[]found,
 ) {
 	controls := map[int]model.Element{}
 	for _, c := range scanResult.Controls {
@@ -334,6 +353,14 @@ func (r *Runner) probeControls(
 			continue
 		}
 		if el.IsSubmit() {
+			continue
+		}
+		if el.Type == "file" {
+			f := model.NewFinding("E_UNSUPPORTED_INPUT", url)
+			f.Element = fmt.Sprintf("input “%s”", el.Name)
+			f.Detail["type"] = "file"
+			r.store.AddFinding(f)
+			r.bump(r.notTested, "file input needs a fixture", 1)
 			continue
 		}
 		if el.Src == "input" && payloads.IsTextLike(el) {
@@ -369,11 +396,17 @@ func (r *Runner) probeControls(
 		obs := probe.ProbeControl(bctx, page, collector, r.cfg, url, el)
 		pointedTo := el
 		r.emit(url, "control", obs, "action", &pointedTo)
+		if obs.Popups > 0 {
+			f := model.NewFinding("E_NEW_TAB", url)
+			f.Element = fmt.Sprintf("%s “%s”", el.Tag, el.Name)
+			f.Detail["popups"] = obs.Extra["popups"]
+			r.store.AddFinding(f)
+		}
 		if obs.Navigated && obs.URLAfter != "" {
 			landed := discover.Normalize(obs.URLAfter)
 			target := discover.Absolute(url, el.Href)
 			if discover.InScope(landed, r.cfg) && (target == "" || landed != discover.Normalize(target)) {
-				*discovered = append(*discovered, landed)
+				*discovered = append(*discovered, found{URL: landed, Depth: depth + 1})
 			}
 		}
 	}
