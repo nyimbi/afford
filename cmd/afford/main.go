@@ -19,6 +19,7 @@ import (
 	"afford/internal/auth"
 	"afford/internal/browser"
 	"afford/internal/config"
+	"afford/internal/mcpserver"
 	"afford/internal/model"
 	"afford/internal/report"
 	"afford/internal/run"
@@ -41,6 +42,8 @@ func dispatch(args []string) int {
 	switch args[0] {
 	case "run":
 		return cmdRun(args[1:])
+	case "mcp":
+		return cmdMCP(args[1:])
 	case "init":
 		return cmdInit(args[1:])
 	case "install":
@@ -61,6 +64,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `afford — crawl a web app, exercise every affordance, report what breaks.
 
   afford run --base-url http://localhost:3000 [options]
+  afford mcp --config afford.toml     # MCP server on stdio, for agents
   afford init [--base-url URL] [--path afford.toml]
   afford install          # download the Playwright browser once
   afford version
@@ -85,6 +89,14 @@ Run options:
   --fail-on LEVEL        blocker | critical | major | minor | info | never
   --quiet                no console summary; artifacts only
 
+MCP options:
+  --config PATH          same configuration as run
+  --base-url URL         the origin the server is allowed to open
+  --allow-destructive    allow destructive controls through the agent
+  --allow-any-host       drop the SSRF host allowlist (dangerous)
+  Credentials are read from AFFORD_USERNAME / AFFORD_PASSWORD; the server
+  never prompts.
+
 Exit codes: 0 clean, 1 findings at or above --fail-on, 2 usage/config, 3 run failed.
 `)
 }
@@ -95,6 +107,65 @@ func cmdInstall() int {
 		return 3
 	}
 	fmt.Println("browsers installed")
+	return 0
+}
+
+func cmdMCP(args []string) int {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var baseURL, configPath, out, authMode, loginURL, storageState string
+	var allowDestructive, allowAnyHost bool
+
+	fs.StringVar(&baseURL, "base-url", "", "origin the server may open")
+	fs.StringVar(&baseURL, "u", "", "alias for --base-url")
+	fs.StringVar(&configPath, "config", "", "TOML configuration file")
+	fs.StringVar(&configPath, "c", "", "alias for --config")
+	fs.StringVar(&out, "out", "", "artifact directory")
+	fs.StringVar(&out, "o", "", "alias for --out")
+	fs.StringVar(&authMode, "auth", "", "none | form | basic | bearer | storage")
+	fs.StringVar(&loginURL, "login-url", "", "login page path")
+	fs.StringVar(&storageState, "storage-state", "", "reuse a saved session")
+	fs.BoolVar(&allowDestructive, "allow-destructive", false, "let the agent click destructive controls")
+	fs.BoolVar(&allowAnyHost, "allow-any-host", false, "drop the SSRF host allowlist")
+
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "afford: %v\n", err)
+		return 2
+	}
+	if baseURL != "" {
+		cfg.Run.BaseURL = baseURL
+	}
+	if out != "" {
+		cfg.Run.Out = out
+	}
+	if authMode != "" {
+		cfg.Auth.Mode = authMode
+	}
+	if loginURL != "" {
+		cfg.Auth.LoginURL = loginURL
+	}
+	if storageState != "" {
+		cfg.Auth.StorageState = storageState
+	}
+	if allowDestructive {
+		cfg.Safety.AllowDestructive = true
+	}
+	if allowAnyHost {
+		cfg.MCP.AllowAnyHost = true
+	}
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "afford: %v\n", err)
+		return 2
+	}
+	server := mcpserver.New(cfg, version)
+	if err := server.Run(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "afford: mcp server: %v\n", err)
+		return 3
+	}
 	return 0
 }
 

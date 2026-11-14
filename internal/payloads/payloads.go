@@ -217,6 +217,19 @@ func EmptyRequired(el model.Element) bool {
 	return el.Required && el.Visible && !el.Disabled && !el.ReadOnly
 }
 
+// IsTextLike reports whether the payload sweep can meaningfully fill this
+// control. Selects, toggles, ranges and file inputs are activated instead.
+func IsTextLike(el model.Element) bool {
+	if !el.IsTextInput() {
+		return false
+	}
+	switch InferKind(el) {
+	case "text", "textarea", "email", "url", "tel", "number", "search", "password", "username":
+		return true
+	}
+	return false
+}
+
 func Describe(el model.Element) string {
 	name := el.Name
 	if name == "" {

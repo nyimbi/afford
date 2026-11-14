@@ -5,7 +5,11 @@
 // in the report.
 package model
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 type Severity string
 
@@ -146,6 +150,18 @@ func (f Finding) Rank() int {
 		return r
 	}
 	return 9
+}
+
+// Key identifies a defect independently of the page it was seen on, so shared
+// chrome (a nav link that 404s) is one finding with N locations, not N findings.
+func (f Finding) Key() string {
+	parts := []string{f.Code, f.Element}
+	for _, name := range []string{"url", "status", "error", "requests"} {
+		if v, ok := f.Detail[name]; ok {
+			parts = append(parts, name+"="+fmt.Sprint(v))
+		}
+	}
+	return strings.Join(parts, "|")
 }
 
 type Option struct {

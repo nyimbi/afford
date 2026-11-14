@@ -5,25 +5,11 @@ package store
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"os"
-	"strings"
 	"sync"
 
 	"afford/internal/model"
 )
-
-// key identifies a defect independently of the page it was seen on, so shared
-// chrome (a nav link that 404s) is one finding with N locations, not N findings.
-func key(f model.Finding) string {
-	parts := []string{f.Code, f.Element}
-	for _, k := range []string{"url", "status", "error", "requests", "error"} {
-		if v, ok := f.Detail[k]; ok {
-			parts = append(parts, fmt.Sprint(v))
-		}
-	}
-	return strings.Join(parts, "|")
-}
 
 type event struct {
 	Kind    string         `json:"kind"`
@@ -117,14 +103,14 @@ func (s *Store) AddProbe(pageURL string) {
 func (s *Store) AddFinding(f model.Finding) {
 	s.mu.Lock()
 	s.merge(f)
-	merged := s.Findings[s.index[key(f)]]
+	merged := s.Findings[s.index[f.Key()]]
 	s.mu.Unlock()
 	s.write(event{Kind: "finding", Finding: &merged})
 }
 
 // merge is called with the lock held.
 func (s *Store) merge(f model.Finding) {
-	k := key(f)
+	k := f.Key()
 	if idx, ok := s.index[k]; ok {
 		existing := &s.Findings[idx]
 		if existing.PageURL != f.PageURL {

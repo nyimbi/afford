@@ -1,4 +1,4 @@
-.PHONY: build test vet canary install fmt clean
+.PHONY: build test vet canary mcp-smoke install fmt clean
 
 build:
 	go build -o bin/afford ./cmd/afford
@@ -14,6 +14,9 @@ fmt:
 
 canary: build
 	./scripts/canary.sh
+
+mcp-smoke: build
+	./scripts/mcp_smoke.sh
 
 install:
 	go install ./cmd/afford

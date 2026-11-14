@@ -15,6 +15,16 @@ type Config struct {
 	Auth   AuthConfig   `toml:"auth"`
 	Safety SafetyConfig `toml:"safety"`
 	Limits LimitsConfig `toml:"limits"`
+	MCP    MCPConfig    `toml:"mcp"`
+}
+
+// MCPConfig governs the agent-facing server. An agent can name any URL, so the
+// host allowlist is the default; widening it is an explicit act.
+type MCPConfig struct {
+	AllowAnyHost    bool `toml:"allow_any_host"`
+	CallTimeoutSecs int  `toml:"call_timeout_secs"`
+	MaxControls     int  `toml:"max_controls"`
+	DefaultReadOnly bool `toml:"default_read_only"`
 }
 
 type RunConfig struct {
@@ -90,6 +100,7 @@ func Default() Config {
 			NavigationTimeoutMS: 15000, ProbeTimeoutMS: 8000,
 			SettleMS: 1200, QuietMS: 350,
 		},
+		MCP: MCPConfig{CallTimeoutSecs: 120, MaxControls: 40},
 	}
 }
 
@@ -131,6 +142,12 @@ func (c *Config) Validate() error {
 	if c.Run.TimeoutSecs < 0 {
 		problems = append(problems, "run.timeout_secs must be >= 0")
 	}
+	if c.MCP.CallTimeoutSecs < 0 {
+		problems = append(problems, "mcp.call_timeout_secs must be >= 0")
+	}
+	if c.MCP.MaxControls < 1 {
+		problems = append(problems, "mcp.max_controls must be at least 1")
+	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
@@ -161,4 +178,11 @@ mode = "none"             # none | form | basic | bearer | storage
 allow_destructive = false
 submit_forms = true
 extra_destructive = []
+
+[mcp]
+# The agent-facing server refuses URLs outside the configured origin unless
+# this is true. Do not widen it for a server an LLM can drive.
+allow_any_host = false
+call_timeout_secs = 120
+max_controls = 40
 `

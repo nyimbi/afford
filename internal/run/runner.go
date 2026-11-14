@@ -65,11 +65,6 @@ type Runner struct {
 	started        time.Time
 }
 
-var textLike = map[string]bool{
-	"text": true, "textarea": true, "email": true, "url": true, "tel": true,
-	"number": true, "search": true, "password": true, "username": true,
-}
-
 func New(cfg config.Config, st *store.Store, runID, baseDir string, ctx context.Context) *Runner {
 	return &Runner{
 		cfg: cfg, store: st, runID: runID, baseDir: baseDir, ctx: ctx,
@@ -332,7 +327,7 @@ func (r *Runner) probeControls(
 		if el.IsSubmit() {
 			continue
 		}
-		if el.Src == "input" && textLike[payloads.InferKind(el)] {
+		if el.Src == "input" && payloads.IsTextLike(el) {
 			continue
 		}
 		if el.Tag == "a" && strings.TrimSpace(el.Href) == "" {
@@ -432,7 +427,7 @@ func (r *Runner) probeForms(page playwright.Page, collector *browser.Collector, 
 		for _, mode := range modes {
 			obs, meta := probe.ProbeForm(page, collector, r.cfg, url, form, controls, mode)
 			r.emit(url, "form", obs, "form", nil)
-			for _, f := range formFindings(obs, meta, url) {
+			for _, f := range probe.FormFindings(obs, meta, url) {
 				if len(f.Evidence) == 0 {
 					f.Evidence = fallbackEvidence(obs)
 				}
@@ -440,46 +435,6 @@ func (r *Runner) probeForms(page playwright.Page, collector *browser.Collector, 
 			}
 		}
 	}
-}
-
-func formFindings(obs model.Observation, meta probe.FormMeta, url string) []model.Finding {
-	var out []model.Finding
-	var five []int
-	for _, rec := range obs.Requests {
-		if rec.Status >= 500 {
-			five = append(five, rec.Status)
-		}
-	}
-	detail := map[string]any{
-		"mode": meta.Mode, "accepted": meta.Accepted, "action": meta.Action,
-	}
-	if meta.Mode == "invalid" {
-		if len(five) > 0 {
-			f := model.NewFinding("E_500_ON_INVALID", url)
-			f.Detail = detail
-			f.Detail["statuses"] = five
-			out = append(out, f)
-		}
-		if meta.RequiredPresent && meta.Accepted {
-			f := model.NewFinding("E_VALIDATION_NOT_ENFORCED", url)
-			f.Detail = detail
-			out = append(out, f)
-		}
-	}
-	if meta.Mode == "valid" {
-		if len(five) > 0 {
-			f := model.NewFinding("E_500_ON_VALID", url)
-			f.Detail = detail
-			f.Detail["statuses"] = five
-			out = append(out, f)
-		}
-		if obs.Effect == "none" && len(obs.ErrorRequests()) == 0 && obs.ActionError == "" {
-			f := model.NewFinding("E_FORM_SUCCESS_UNVERIFIED", url)
-			f.Detail = detail
-			out = append(out, f)
-		}
-	}
-	return out
 }
 
 func (r *Runner) finalChecks() {

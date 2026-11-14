@@ -373,6 +373,49 @@ func overflow(page playwright.Page) bool {
 	return flag
 }
 
+// FormFindings applies the form-specific rules. It lives here because this is
+// the only place that knows which mode was run and whether the submit reached
+// the server.
+func FormFindings(obs model.Observation, meta FormMeta, url string) []model.Finding {
+	var out []model.Finding
+	var five []int
+	for _, rec := range obs.Requests {
+		if rec.Status >= 500 {
+			five = append(five, rec.Status)
+		}
+	}
+	detail := map[string]any{
+		"mode": meta.Mode, "accepted": meta.Accepted, "action": meta.Action,
+	}
+	if meta.Mode == "invalid" {
+		if len(five) > 0 {
+			f := model.NewFinding("E_500_ON_INVALID", url)
+			f.Detail = detail
+			f.Detail["statuses"] = five
+			out = append(out, f)
+		}
+		if meta.RequiredPresent && meta.Accepted {
+			f := model.NewFinding("E_VALIDATION_NOT_ENFORCED", url)
+			f.Detail = detail
+			out = append(out, f)
+		}
+	}
+	if meta.Mode == "valid" {
+		if len(five) > 0 {
+			f := model.NewFinding("E_500_ON_VALID", url)
+			f.Detail = detail
+			f.Detail["statuses"] = five
+			out = append(out, f)
+		}
+		if obs.Effect == "none" && len(obs.ErrorRequests()) == 0 && obs.ActionError == "" {
+			f := model.NewFinding("E_FORM_SUCCESS_UNVERIFIED", url)
+			f.Detail = detail
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 func ProbeForm(
 	page playwright.Page,
 	collector *browser.Collector,

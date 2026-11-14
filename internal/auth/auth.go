@@ -48,7 +48,7 @@ func ResolveCredentials(cfg config.Config, allowPrompt bool) (Credentials, error
 	if !allowPrompt || (creds.Username != "" && creds.Password != "") {
 		if creds.Username == "" || creds.Password == "" {
 			return creds, fmt.Errorf(
-				"credentials not found: set %s and %s, or run without --no-prompt",
+				"credentials not found: set %s and %s in the environment",
 				cfg.Auth.UsernameEnv, cfg.Auth.PasswordEnv)
 		}
 		return creds, nil

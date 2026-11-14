@@ -34,7 +34,6 @@ It does not prove business rules are correct. It proves the affordances it could
 reach did not crash, fail, or go inert, and it prints what it did not test.
 
 ## Authentication
-
 ```toml
 [auth]
 mode = "form"            # none | form | basic | bearer | storage
@@ -47,6 +46,22 @@ Credentials come from a TTY prompt, from `AFFORD_USERNAME` / `AFFORD_PASSWORD`, 
 from a saved `--storage-state` file. They never enter argv, the report, or the run
 log. If every navigation lands back on a login path, the run emits `E_AUTH_WALL`
 at blocker severity rather than reporting a clean one-page crawl.
+
+## MCP — let an agent check one page
+
+```sh
+afford mcp --config afford.toml      # stdio; no browser starts until the first call
+```
+
+Three tools: `inspect_page` (capture only, never interacts), `check_page` (click, fill,
+optionally submit), `crawl_site` (bounded whole-site sweep that writes a report). Results
+carry structured findings, probe counts and the path to a screenshot.
+
+The safety posture belongs to the server, not the caller: destructive controls stay
+quarantined, forms are not submitted unless asked, the URL host allowlist blocks an agent
+from aiming the browser at arbitrary hosts, and credentials come from the server's
+environment rather than tool arguments. Wiring, arguments and the agent flow are in
+[`docs/mcp.md`](docs/mcp.md).
 
 ## Safety
 
@@ -93,8 +108,9 @@ unicode; `deep` — injection sentinels), `[limits] concurrency`, and
 ## Development
 
 ```sh
-make test      # unit tests
-make canary    # the tool's own regression gate against fixtures/canary
+make test        # unit tests
+make canary      # the tool's own regression gate against fixtures/canary
+make mcp-smoke   # speaks MCP over stdio to the binary and asserts tool behaviour
 make vet
 ```
 
