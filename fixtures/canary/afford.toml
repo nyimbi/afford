@@ -1,0 +1,19 @@
+[run]
+base_url = "http://127.0.0.1:8099"
+depth = "standard"
+concurrency = 2
+viewport = [1280, 900]
+out = ".afford/canary"
+
+[scope]
+include = ["/**"]
+exclude = ["/logout", "/signout", "/api/**"]
+
+[auth]
+mode = "form"
+login_url = "/login"
+success_url_contains = "/dashboard"
+
+[safety]
+allow_destructive = false
+submit_forms = true
