@@ -82,8 +82,9 @@ a{color:var(--accent);text-decoration:none}
 .pill b{font-weight:650}
 .pill.blocker b{color:var(--blocker)} .pill.critical b{color:var(--critical)}
 .pill.major b{color:var(--major)} .pill.minor b{color:var(--minor)} .pill.info b{color:var(--info)}
-.cover{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:14px 0}
-.cover div{background:var(--panel);padding:12px 14px}
+.cover{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
+.cover div{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+	padding:12px 14px;flex:1 1 150px;min-width:140px}
 .cover .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
 .cover .v{font-size:19px;font-variant-numeric:tabular-nums;margin-top:2px}
 .toolbar{display:flex;gap:10px;margin:0 0 10px;flex-wrap:wrap}
@@ -99,13 +100,15 @@ td.sev.major{color:var(--major)} td.sev.minor{color:var(--minor)} td.sev.info{co
 code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
 pre{white-space:pre-wrap;word-break:break-word;background:var(--chip);border-radius:8px;padding:10px;margin:8px 0 0;font-size:12px;color:var(--muted)}
 details summary{cursor:pointer;color:var(--muted);font-size:12px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
-.card img{width:100%;height:150px;object-fit:cover;object-position:top;border-bottom:1px solid var(--line);background:var(--chip)}
-.card .body{padding:11px 13px 13px}
-.card ul{margin:8px 0 0;padding:0;list-style:none}
-.card li{font-size:12.5px;color:var(--muted);padding:2px 0}
-.card li b{color:var(--ink);font-weight:600;font-family:ui-monospace,monospace;font-size:11.5px}
+img.thumb{width:96px;height:62px;object-fit:cover;object-position:top;border-radius:6px;
+	border:1px solid var(--line);display:block;background:var(--chip)}
+td.thumb{padding:6px 8px;width:104px}
+table.pages td{vertical-align:middle}
+table.pages tbody tr:hover td{background:var(--chip)}
+td.bad{color:var(--critical);font-weight:650}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted);margin-right:7px}
+.dot.blocker{background:var(--blocker)} .dot.critical{background:var(--critical)}
+.dot.major{background:var(--major)} .dot.minor{background:var(--minor)} .dot.info{background:var(--info)}
 .empty{color:var(--muted);font-size:14px;padding:18px 0}
 .limits{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 18px}
 .limits li{color:var(--muted);font-size:13.5px;margin:3px 0}
@@ -124,6 +127,14 @@ function apply() {
 }
 q.addEventListener('input', apply);
 sev.addEventListener('change', apply);
+const pq = document.getElementById('pq');
+function applyPages() {
+	const text = pq.value.toLowerCase();
+	document.querySelectorAll('tbody tr[data-page]').forEach(function (tr) {
+		tr.style.display = (!text || tr.dataset.page.indexOf(text) >= 0) ? '' : 'none';
+	});
+}
+pq.addEventListener('input', applyPages);
 `
 
 func buildHTML(p Payload, baseDir string, embed bool) string {
@@ -154,13 +165,33 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	}
 	b.WriteString("</div>")
 
+	shotCount := 0
+	loads := make([]int64, 0, len(p.Pages))
+	settled := make([]int64, 0, len(p.Pages))
+	for _, page := range p.Pages {
+		if page.Screenshot != "" {
+			shotCount++
+		}
+		if page.LoadMS > 0 {
+			loads = append(loads, page.LoadMS)
+		}
+		if page.SettledMS > 0 {
+			settled = append(settled, page.SettledMS)
+		}
+	}
+	sort.Slice(loads, func(i, j int) bool { return loads[i] < loads[j] })
+	sort.Slice(settled, func(i, j int) bool { return settled[i] < settled[j] })
+
 	b.WriteString("<div class='cover'>")
 	cover := [][2]string{
 		{"Pages visited", fmt.Sprint(p.Summary.PagesVisited)},
+		{"Screenshots", fmt.Sprintf("%d/%d", shotCount, len(p.Pages))},
 		{"Controls probed", fmt.Sprintf("%d/%d", p.Summary.ControlsProbed, p.Summary.ControlsTotal)},
 		{"Forms", fmt.Sprintf("%d/%d", p.Summary.FormsProbed, p.Summary.FormsTotal)},
 		{"Inputs swept", fmt.Sprint(p.Summary.InputsSwept)},
 		{"Payloads sent", fmt.Sprint(p.Summary.PayloadsSent)},
+		{"Load p50 / p95", fmt.Sprintf("%d / %d ms", percentile(loads, 50), percentile(loads, 95))},
+		{"Settled p50 / p95", fmt.Sprintf("%d / %d ms", percentile(settled, 50), percentile(settled, 95))},
 	}
 	for _, kv := range cover {
 		fmt.Fprintf(&b, "<div><div class='k'>%s</div><div class='v'>%s</div></div>", esc(kv[0]), esc(kv[1]))
@@ -206,11 +237,31 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	}
 	b.WriteString("</tbody></table>")
 
-	b.WriteString("<h2>Pages</h2><div class='grid'>")
+	b.WriteString("<h2>Pages</h2>")
+	b.WriteString("<div class='toolbar'>")
+	b.WriteString("<input id='pq' type='search' placeholder='filter pages by URL, title or template…'>")
+	b.WriteString("</div>")
+	b.WriteString("<table class='pages'><thead><tr><th class='thumb'></th><th>Page</th>")
+	b.WriteString("<th>Status</th><th>Load</th><th>Settled</th><th>Controls</th><th>Probes</th><th>Findings</th>")
+	b.WriteString("</tr></thead><tbody>")
 	if len(p.Pages) == 0 {
-		b.WriteString("<div class='empty'>no pages captured</div>")
+		b.WriteString("<tr><td colspan='8'>no pages captured</td></tr>")
 	}
-	for _, page := range p.Pages {
+	ordered := append([]model.Page(nil), p.Pages...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		si, sj := byPage[ordered[i].URL], byPage[ordered[j].URL]
+		if wi, wj := worstRank(si), worstRank(sj); wi != wj {
+			return wi < wj
+		}
+		if len(si) != len(sj) {
+			return len(si) > len(sj)
+		}
+		if ordered[i].LoadMS != ordered[j].LoadMS {
+			return ordered[i].LoadMS > ordered[j].LoadMS
+		}
+		return ordered[i].URL < ordered[j].URL
+	})
+	for _, page := range ordered {
 		src := ""
 		if page.Screenshot != "" {
 			if embed {
@@ -222,25 +273,30 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 				src = page.Screenshot
 			}
 		}
-		b.WriteString("<article class='card'>")
+		items := byPage[page.URL]
+		fmt.Fprintf(&b, "<tr data-page='%s'>", esc(strings.ToLower(
+			page.URL+" "+page.Title+" "+page.Template)))
 		if src != "" {
-			fmt.Fprintf(&b, "<img loading='lazy' src='%s' alt='screenshot of %s'>", esc(src), esc(page.URL))
-		}
-		b.WriteString("<div class='body'>")
-		fmt.Fprintf(&b, "<h3><a href='%s'>%s</a></h3>", esc(page.URL), esc(page.URL))
-		fmt.Fprintf(&b, "<div class='meta'>%s · HTTP %d · %d probes</div>",
-			esc(page.Template), page.Status, page.Probes)
-		b.WriteString("<ul>")
-		if items := byPage[page.URL]; len(items) > 0 {
-			for _, f := range items {
-				fmt.Fprintf(&b, "<li><b>%s</b> %s</li>", esc(f.Code), esc(f.Title))
-			}
+			fmt.Fprintf(&b, "<td class='thumb'><a href='%s'><img class='thumb' loading='lazy' src='%s' alt='screenshot of %s'></a></td>",
+				esc(src), esc(src), esc(page.URL))
 		} else {
-			b.WriteString("<li>no findings</li>")
+			b.WriteString("<td class='thumb'><span class='meta'>no image</span></td>")
 		}
-		b.WriteString("</ul></div></article>")
+		fmt.Fprintf(&b, "<td><a href='%s'>%s</a><div class='meta'>%s · depth %d%s</div></td>",
+			esc(page.URL), esc(page.URL), esc(page.Template), page.Depth, parentNote(page.Parent))
+		statusClass := ""
+		if page.Status >= 400 {
+			statusClass = " class='bad'"
+		}
+		fmt.Fprintf(&b, "<td%s>%d</td>", statusClass, page.Status)
+		fmt.Fprintf(&b, "<td>%s</td>", loadLabel(page.LoadMS))
+		fmt.Fprintf(&b, "<td>%s</td>", loadLabel(page.SettledMS))
+		fmt.Fprintf(&b, "<td>%d</td>", page.Controls)
+		fmt.Fprintf(&b, "<td>%d</td>", page.Probes)
+		fmt.Fprintf(&b, "<td><span class='dot %s'></span>%d</td>", worstSeverity(items), len(items))
+		b.WriteString("</tr>")
 	}
-	b.WriteString("</div>")
+	b.WriteString("</tbody></table>")
 
 	b.WriteString("<h2>Coverage limits</h2><div class='limits'>")
 	b.WriteString("<p class='meta'>What this run did not test:</p><ul>")
@@ -257,6 +313,57 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	b.WriteString("</ul></div>")
 	fmt.Fprintf(&b, "<script>%s</script></main></body></html>", filterJS)
 	return b.String()
+}
+
+func percentile(sorted []int64, p int) int64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	idx := (p*len(sorted)+99)/100 - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
+}
+
+func loadLabel(ms int64) string {
+	if ms <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d ms", ms)
+}
+
+func worstSeverity(items []model.Finding) string {
+	worst, rank := "", 99
+	for _, f := range items {
+		if r := f.Rank(); r < rank {
+			rank, worst = r, string(f.Severity)
+		}
+	}
+	return worst
+}
+
+func worstRank(items []model.Finding) int {
+	rank := 99
+	for _, f := range items {
+		if r := f.Rank(); r < rank {
+			rank = r
+		}
+	}
+	return rank
+}
+
+func parentNote(parent string) string {
+	if parent == "" {
+		return ""
+	}
+	if len(parent) > 70 {
+		parent = parent[:67] + "…"
+	}
+	return " · linked from " + parent
 }
 
 type junitFailure struct {

@@ -60,9 +60,30 @@ type AuthConfig struct {
 }
 
 type SafetyConfig struct {
-	AllowDestructive bool     `toml:"allow_destructive"`
+	// AllowDestructive is the umbrella grant: it covers both classes below,
+	// and remains the shorthand for "I know what this will do".
+	AllowDestructive bool `toml:"allow_destructive"`
+	// AllowDelete permits controls that delete or erase data.
+	AllowDelete bool `toml:"allow_delete"`
+	// AllowSideEffects permits irreversible actions that are not deletion:
+	// paying, sending, publishing, approving, logging out.
+	AllowSideEffects bool     `toml:"allow_side_effects"`
 	SubmitForms      bool     `toml:"submit_forms"`
 	ExtraDestructive []string `toml:"extra_destructive"`
+}
+
+// Permits reports whether the configured grants cover a permission class.
+func (s SafetyConfig) Permits(kind string) bool {
+	if s.AllowDestructive {
+		return true
+	}
+	switch kind {
+	case "delete":
+		return s.AllowDelete
+	case "side_effect":
+		return s.AllowSideEffects
+	}
+	return false
 }
 
 type LimitsConfig struct {
@@ -175,8 +196,10 @@ mode = "none"             # none | form | basic | bearer | storage
 # storage_state = ".afford/state/session.json"
 
 [safety]
-allow_destructive = false
-submit_forms = true
+submit_forms = true       # may create or change data by submitting forms
+allow_delete = false      # click controls that delete or erase data
+allow_side_effects = false # click pay/send/publish/logout/approve controls
+allow_destructive = false  # umbrella: sets both grants above
 extra_destructive = []
 
 [mcp]

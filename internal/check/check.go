@@ -41,6 +41,8 @@ type Result struct {
 	FinalURL       string          `json:"final_url"`
 	Title          string          `json:"title"`
 	Status         int             `json:"status"`
+	LoadMS         int64           `json:"load_ms"`
+	SettledMS      int64           `json:"settled_ms"`
 	AuthRedirect   bool            `json:"auth_redirect,omitempty"`
 	Findings       []model.Finding `json:"findings"`
 	Controls       int             `json:"controls"`
@@ -155,7 +157,10 @@ func (c *Checker) Check(ctx context.Context, rawURL string, opts Options) (Resul
 		return Result{}, fmt.Errorf("scan %s: %w", rawURL, err)
 	}
 
-	result := Result{URL: rawURL, FinalURL: page.URL(), Title: scanResult.Title, Status: load.Status}
+	result := Result{
+		URL: rawURL, FinalURL: page.URL(), Title: scanResult.Title,
+		Status: load.Status, LoadMS: load.LoadMS, SettledMS: load.SettledMS,
+	}
 	result.AuthRedirect = discover.IsLoginURL(result.FinalURL, cfg.Auth.LoginPathPatterns) &&
 		!discover.IsLoginURL(rawURL, cfg.Auth.LoginPathPatterns)
 
@@ -202,6 +207,7 @@ func (c *Checker) Check(ctx context.Context, rawURL string, opts Options) (Resul
 	add(oracles.Evaluate(capture, result.FinalURL, "capture", nil)...)
 	add(oracles.Unlabeled(visible, result.FinalURL)...)
 	add(oracles.EmptyHref(visible, result.FinalURL)...)
+	add(oracles.OptionsAudit(visible, result.FinalURL)...)
 	if result.AuthRedirect {
 		f := model.NewFinding("E_AUTH_REDIRECT", rawURL)
 		f.Detail["redirected_to"] = result.FinalURL
@@ -210,7 +216,13 @@ func (c *Checker) Check(ctx context.Context, rawURL string, opts Options) (Resul
 
 	result.Controls = len(visible)
 	if opts.Screenshot {
-		result.Screenshot = c.shoot(page, rawURL)
+		shot, err := c.shoot(page, rawURL)
+		if err != nil {
+			f := model.NewFinding("E_SCREENSHOT_FAILED", rawURL)
+			f.Detail["error"] = err.Error()
+			add(f)
+		}
+		result.Screenshot = shot
 	}
 	if opts.ReadOnly || result.AuthRedirect {
 		result.Notes = append(result.Notes, readOnlyNote(opts, result.AuthRedirect))
@@ -236,7 +248,7 @@ func readOnlyNote(opts Options, authRedirect bool) string {
 	return ""
 }
 
-func (c *Checker) shoot(page playwright.Page, rawURL string) string {
+func (c *Checker) shoot(page playwright.Page, rawURL string) (string, error) {
 	sum := sha1.Sum([]byte(rawURL))
 	name := fmt.Sprintf("%d-%s.png", time.Now().UnixMilli(), hex.EncodeToString(sum[:])[:10])
 	path := filepath.Join(c.cfg.Run.Out, "mcp", "shots", name)
@@ -245,9 +257,9 @@ func (c *Checker) shoot(page playwright.Page, rawURL string) string {
 		full = path
 	}
 	if _, err := browser.Screenshot(page, full); err != nil {
-		return ""
+		return "", err
 	}
-	return full
+	return full, nil
 }
 
 func (c *Checker) probeControls(
@@ -261,7 +273,8 @@ func (c *Checker) probeControls(
 	result *Result,
 	add func(...model.Finding),
 ) {
-	probed, destructive, offScope := 0, 0, 0
+	probed, offScope := 0, 0
+	destructive := map[string]int{}
 	for _, el := range scanResult.Controls {
 		if probed >= opts.MaxControls {
 			result.Notes = append(result.Notes, fmt.Sprintf("control budget reached at %d", probed))
@@ -282,8 +295,9 @@ func (c *Checker) probeControls(
 				continue
 			}
 		}
-		if payloads.IsDestructive(el, cfg.Safety.ExtraDestructive) && !cfg.Safety.AllowDestructive {
-			destructive++
+		if kind := payloads.DestructiveKind(el, cfg.Safety.ExtraDestructive); kind != "" &&
+			!cfg.Safety.Permits(kind) {
+			destructive[kind]++
 			continue
 		}
 		probed++
@@ -292,9 +306,10 @@ func (c *Checker) probeControls(
 		add(oracles.Evaluate(obs, rawURL, "action", &pointedTo)...)
 	}
 	result.ControlsProbed = probed
-	if destructive > 0 {
-		result.Notes = append(result.Notes,
-			fmt.Sprintf("skipped %d destructive control(s); start the server with --allow-destructive to include them", destructive))
+	for kind, n := range destructive {
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"skipped %d %s control(s); start the server with %s to include them",
+			n, kind, payloads.OptInFlag(kind)))
 	}
 	if offScope > 0 {
 		result.Notes = append(result.Notes, fmt.Sprintf("skipped %d link(s) outside the crawl scope", offScope))
@@ -350,12 +365,14 @@ func (c *Checker) probeForms(
 				"forms were filled and validated but not submitted; pass submit=true to submit them")
 			continue
 		}
-		if submitEl, ok := controls[form.SubmitIdx[0]]; ok &&
-			payloads.IsDestructive(submitEl, cfg.Safety.ExtraDestructive) &&
-			!cfg.Safety.AllowDestructive {
-			result.Notes = append(result.Notes,
-				fmt.Sprintf("skipped a destructive submit control (%q)", submitEl.Name))
-			continue
+		if submitEl, ok := controls[form.SubmitIdx[0]]; ok {
+			if kind := payloads.DestructiveKind(submitEl, cfg.Safety.ExtraDestructive); kind != "" &&
+				!cfg.Safety.Permits(kind) {
+				result.Notes = append(result.Notes, fmt.Sprintf(
+					"skipped a %s submit control (%q); start the server with %s to include it",
+					kind, submitEl.Name, payloads.OptInFlag(kind)))
+				continue
+			}
 		}
 		requiredPresent := false
 		for _, idx := range form.ControlIdx {

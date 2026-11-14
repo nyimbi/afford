@@ -17,11 +17,20 @@ import (
 )
 
 type Load struct {
-	OK       bool
-	Status   int
-	FinalURL string
-	Err      error
+	OK        bool
+	Status    int
+	FinalURL  string
+	LoadMS    int64 // browser loadEventEnd
+	SettledMS int64 // wall clock from navigation to settled
+	Err       error
 }
+
+const navTimingJS = `() => {
+	const entries = performance.getEntriesByType ? performance.getEntriesByType('navigation') : [];
+	const n = entries && entries[0];
+	if (!n) return 0;
+	return Math.round(n.loadEventEnd || n.domContentLoadedEventEnd || 0);
+}`
 
 type Anomaly struct {
 	Element model.Element
@@ -45,19 +54,31 @@ type FormMeta struct {
 }
 
 func Reset(page playwright.Page, cfg config.Config, url string) Load {
+	started := time.Now()
 	response, err := page.Goto(url, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		Timeout:   playwright.Float(float64(cfg.Limits.NavigationTimeoutMS)),
 	})
 	if err != nil {
-		return Load{OK: false, FinalURL: page.URL(), Err: err}
+		return Load{
+			OK: false, FinalURL: page.URL(), Err: err,
+			SettledMS: time.Since(started).Milliseconds(),
+		}
 	}
 	browser.Settle(page, cfg)
+	settled := time.Since(started).Milliseconds()
 	status := 0
 	if response != nil {
 		status = response.Status()
 	}
-	return Load{OK: true, Status: status, FinalURL: page.URL()}
+	loadMS := int64(0)
+	if raw, err := page.Evaluate(navTimingJS); err == nil {
+		loadMS = asInt64(raw)
+	}
+	return Load{
+		OK: true, Status: status, FinalURL: page.URL(),
+		LoadMS: loadMS, SettledMS: settled,
+	}
 }
 
 const signatureJS = `
@@ -252,7 +273,37 @@ func ProbeControl(
 		DurationMS:      int(time.Since(started).Milliseconds()),
 		Extra:           map[string]any{"popups": popupURLs},
 	}
+	// A link's destination can be a soft 404: HTTP 200 with "page not found"
+	// text. Sample the main content, not the whole body: site chrome routinely
+	// contains labels like "404" or "missing" that say nothing about this page.
+	if obs.Navigated {
+		const mainText = `() => {
+			const main = document.querySelector('main, [role=main], #main, #content');
+			const el = main || document.body;
+			return el ? (el.innerText || '').slice(0, 600) : '';
+		}`
+		if raw, err := page.Evaluate(mainText); err == nil {
+			if sample, ok := raw.(string); ok {
+				obs.Extra["text_sample"] = sample
+			}
+		}
+	}
 	return obs
+}
+
+// asInt64 accepts the numeric shapes the Playwright decoder can hand back.
+func asInt64(v any) int64 {
+	switch n := v.(type) {
+	case float64:
+		return int64(n)
+	case float32:
+		return int64(n)
+	case int:
+		return int64(n)
+	case int64:
+		return n
+	}
+	return 0
 }
 
 // since returns the events that appeared after the baseline was taken.

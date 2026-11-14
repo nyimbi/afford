@@ -96,6 +96,8 @@ type pageOut struct {
 	FinalURL       string          `json:"final_url"`
 	Status         int             `json:"status"`
 	Title          string          `json:"title"`
+	LoadMS         int64           `json:"load_ms"`
+	SettledMS      int64           `json:"settled_ms"`
 	OK             bool            `json:"ok"`
 	Counts         map[string]int  `json:"counts"`
 	Findings       []model.Finding `json:"findings"`
@@ -238,6 +240,7 @@ func (s *Server) crawlSite(ctx context.Context, _ *mcp.CallToolRequest, in crawl
 func toPageOut(r check.Result) pageOut {
 	return pageOut{
 		URL: r.URL, FinalURL: r.FinalURL, Status: r.Status, Title: r.Title,
+		LoadMS: r.LoadMS, SettledMS: r.SettledMS,
 		OK: r.OK(), Counts: r.Counts(), Findings: r.Findings,
 		Controls: r.Controls, ControlsProbed: r.ControlsProbed,
 		Forms: r.Forms, FormsProbed: r.FormsProbed,
@@ -266,7 +269,8 @@ func digestPage(r check.Result) string {
 	counts := r.Counts()
 	fmt.Fprintf(&b, "\n%d finding(s): %d blocker, %d critical, %d major, %d minor, %d info",
 		len(r.Findings), counts["blocker"], counts["critical"], counts["major"], counts["minor"], counts["info"])
-	fmt.Fprintf(&b, "\ncontrols probed %d/%d · forms %d/%d · inputs swept %d · payloads %d",
+	fmt.Fprintf(&b, "\nload %d ms · settled %d ms · controls probed %d/%d · forms %d/%d · inputs swept %d · payloads %d",
+		r.LoadMS, r.SettledMS,
 		r.ControlsProbed, r.Controls, r.FormsProbed, r.Forms, r.InputsSwept, r.PayloadsSent)
 	if len(r.Findings) == 0 {
 		b.WriteString("\nno findings")
@@ -322,8 +326,9 @@ func (s *Server) Run(ctx context.Context) error {
 			"failed requests, blank/error renders and horizontal overflow, then exercise its affordances: " +
 			"click every enabled control from a fresh load, fill every text input with a battery derived " +
 			"from the field's declared type, and (only with submit=true) submit each form. " +
-			"Controls whose names look destructive are never clicked unless the server was started with " +
-			"--allow-destructive. Returns findings with evidence, a severity summary and a screenshot path.",
+			"Controls that delete data are never clicked unless the server was started with --allow-delete; " +
+			"paying, sending, publishing, approving and logging out need --allow-side-effects. " +
+			"Returns findings with evidence, a severity summary, load timings and a screenshot path.",
 	}, s.checkPage)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -337,7 +342,8 @@ func (s *Server) Run(ctx context.Context) error {
 		Name: "crawl_site",
 		Description: "Crawl the configured origin from its base URL and probe every reachable page, then " +
 			"write an HTML/JSON/JUnit report. Slower than check_page; use it for whole-site sweeps. " +
-			"Forms are not submitted unless submit=true; destructive controls remain quarantined.",
+			"Forms are not submitted unless submit=true; deletion and other irreversible controls remain " +
+			"quarantined unless the server was started with the matching grant.",
 	}, s.crawlSite)
 
 	return server.Run(ctx, &mcp.StdioTransport{})

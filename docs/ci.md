@@ -78,4 +78,6 @@ Run against a preview deployment with disposable data. Against production, use
 `--no-submit` and `--max-pages` low; the tool will still catch broken routes,
 dead controls, and console errors without writing anything.
 
-Do not enable `--allow-destructive` unless the database can be thrown away.
+Deletion and other irreversible actions stay off unless granted: `--allow-delete` for
+delete/erase controls, `--allow-side-effects` for pay/send/publish/logout/approve, or
+`--allow-destructive` for both. Do not grant them unless the database can be thrown away.

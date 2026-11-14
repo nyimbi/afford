@@ -72,13 +72,23 @@ func labels(ps []Payload) map[string]bool {
 }
 
 func TestIsDestructive(t *testing.T) {
-	if !IsDestructive(el("button", "Delete account", "submit", ""), nil) {
-		t.Error("delete should be destructive")
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"Delete account", true},
+		{"Log out", true},
+		{"Sign out", true},
+		{"sign-out", true},
+		{"Reset filters", true},
+		{"Save draft", false},
+		{"Dropdown", false},
+		{"dropdown menu", false},
+		{"Drop shipment", true},
 	}
-	if !IsDestructive(el("button", "Log out", "button", ""), nil) {
-		t.Error("log out should be destructive")
-	}
-	if IsDestructive(el("button", "Save draft", "button", ""), nil) {
-		t.Error("save draft should not be destructive")
+	for _, c := range cases {
+		if got := IsDestructive(el("button", c.name, "button", ""), nil); got != c.want {
+			t.Errorf("IsDestructive(%q) = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

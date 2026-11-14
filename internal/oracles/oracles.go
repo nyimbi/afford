@@ -14,6 +14,121 @@ var errorBoundary = regexp.MustCompile(`(?i)application error|client-side except
 	`unhandled runtime error|hydration failed|this page could not be found|internal server error|` +
 	`unexpected error|something broke|white screen`)
 
+var (
+	uuidRe = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	// ULIDs start with a 48-bit timestamp, so the first character is 0-7 until
+	// well past this century. Requiring that cuts most 26-character false hits.
+	ulidRe = regexp.MustCompile(`(?i)\b[0-7][0-9a-hjkmnp-tv-z]{25}\b`)
+)
+
+func internalID(text string) string {
+	switch {
+	case uuidRe.MatchString(text):
+		return "uuid"
+	case ulidRe.MatchString(text):
+		return "ulid"
+	}
+	return ""
+}
+
+// OptionsAudit reports identifiers shown in dropdowns and dropdowns with
+// nothing to choose. It reads only the inventory the scan already captured.
+func OptionsAudit(controls []model.Element, pageURL string) []model.Finding {
+	var out []model.Finding
+	for _, el := range controls {
+		if el.Tag != "select" || !el.Visible || el.Disabled {
+			continue
+		}
+		selectable := 0
+		var labelHits, valueHits []string
+		kinds := map[string]bool{}
+		for _, opt := range el.Options {
+			value := strings.TrimSpace(opt.Value)
+			label := strings.TrimSpace(opt.Label)
+			if value != "" && !opt.Disabled {
+				selectable++
+			}
+			if kind := internalID(label); kind != "" {
+				kinds[kind] = true
+				if len(labelHits) < 5 {
+					labelHits = append(labelHits, truncate(label, 80))
+				}
+				continue
+			}
+			if kind := internalID(value); kind != "" {
+				kinds[kind] = true
+				if len(valueHits) < 5 {
+					valueHits = append(valueHits, truncate(value, 80))
+				}
+			}
+		}
+		name := el.Name
+		if name == "" {
+			name = el.NameAttr
+		}
+		if len(labelHits) > 0 {
+			f := model.NewFinding("E_UUID_EXPOSED", pageURL)
+			f.Element = fmt.Sprintf("select “%s”", name)
+			f.Detail["exposed_in"] = "label"
+			f.Detail["kind"] = firstKind(kinds)
+			f.Detail["options"] = labelHits
+			f.Detail["options_total"] = len(el.Options)
+			out = append(out, f)
+		}
+		if len(valueHits) > 0 {
+			f := model.NewFinding("E_UUID_IN_OPTION_VALUE", pageURL)
+			f.Element = fmt.Sprintf("select “%s”", name)
+			f.Detail["exposed_in"] = "value"
+			f.Detail["kind"] = firstKind(kinds)
+			f.Detail["options"] = valueHits
+			f.Detail["options_total"] = len(el.Options)
+			out = append(out, f)
+		}
+		if selectable == 0 {
+			f := model.NewFinding("E_EMPTY_SELECT", pageURL)
+			f.Element = fmt.Sprintf("select “%s”", name)
+			f.Detail["options_total"] = len(el.Options)
+			if len(el.Options) > 0 {
+				f.Detail["first_option"] = truncate(strings.TrimSpace(el.Options[0].Label), 80)
+			}
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func firstKind(kinds map[string]bool) string {
+	if kinds["uuid"] {
+		return "uuid"
+	}
+	return "ulid"
+}
+
+// notFound matches the language a page uses when it could not find its subject.
+// A 200 response with this text is the SPA soft-404: the router rendered an
+// error view and the server never saw a missing path. The phrases stay narrow
+// on purpose: bare "404" and "missing" appear in ordinary site chrome.
+var notFound = regexp.MustCompile(
+	`(?i)\b(page not found|404 page|404 error|404 not found|not found page|` +
+		`could(n't| not) be found|does(n't| not) exist|no longer (exists|available)|` +
+		`could(n't| not) find|unknown route|nothing here)\b`)
+
+func observationText(obs model.Observation) string {
+	sample, _ := obs.Extra["text_sample"].(string)
+	return sample
+}
+
+func softNotFound(obs model.Observation) bool {
+	sample := observationText(obs)
+	if sample == "" {
+		return false
+	}
+	if len(sample) > 600 {
+		sample = sample[:600]
+	}
+	return notFound.MatchString(sample)
+}
+
 func evidence(obs model.Observation) []string {
 	var lines []string
 	for _, e := range obs.PageErrors {
@@ -183,9 +298,20 @@ func Evaluate(obs model.Observation, pageURL, kind string, element *model.Elemen
 			out = append(out, f)
 		}
 		if obs.Navigated && obs.Status >= 400 {
-			f := add("E_NAV_TO_NONOK")
+			code := "E_NAV_TO_NONOK"
+			if element.Tag == "a" {
+				code = "E_DEAD_LINK"
+			}
+			f := add(code)
 			f.Detail["status"] = obs.Status
 			f.Detail["url"] = obs.URLAfter
+			out = append(out, f)
+		} else if obs.Navigated && element.Tag == "a" && softNotFound(obs) {
+			f := add("E_DEAD_LINK")
+			f.Detail["status"] = obs.Status
+			f.Detail["url"] = obs.URLAfter
+			f.Detail["soft_404"] = true
+			f.Detail["text"] = truncate(observationText(obs), 180)
 			out = append(out, f)
 		}
 	}

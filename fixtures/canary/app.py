@@ -23,6 +23,8 @@ NAV = """
   <a href="/novalidate">novalidate</a>
   <a href="/broken-api">broken api</a>
   <a href="/missing">missing</a>
+  <a href="/soft-404">soft 404</a>
+  <a href="/dropdown">dropdown</a>
   <a href="/form-ok">valid form</a>
 </nav>
 """
@@ -105,6 +107,10 @@ def dashboard(request: Request) -> Response:
 	body = """
 	<h1>Dashboard</h1>
 	<p>Create an order. The endpoint is broken on purpose: every valid submission is a 500.</p>
+	<p>
+	  <button type="button" id="delete-order">Delete order</button>
+	  <button type="button" id="publish">Publish report</button>
+	</p>
 	<form method="post" action="/orders">
 	  <label for="email">Customer email</label>
 	  <input id="email" name="customer_email" type="email" required>
@@ -208,6 +214,41 @@ def broken_api(request: Request) -> Response:
 @app.get("/api/boom")
 def api_boom() -> Response:
 	return JSONResponse({"detail": "upstream exploded"}, status_code=500)
+
+
+@app.get("/soft-404", response_class=HTMLResponse)
+def soft_404() -> str:
+	# Planted defect: a 200 response whose body says the page is missing. This is
+	# what an SPA router does when it renders its "not found" view.
+	body = "<h1>Page not found</h1><p>The item you asked for does not exist.</p>"
+	return page("Missing thing", body)
+
+
+@app.get("/dropdown", response_class=HTMLResponse)
+def dropdown() -> str:
+	# Three planted defects: a UUID shown as an option label, UUID option values,
+	# and an enabled select with nothing to choose.
+	body = """
+	<h1>Dropdowns</h1>
+	<form method="get" action="/dropdown">
+	  <label for="owner">Owner</label>
+	  <select id="owner" name="owner">
+	    <option value="1">Alice</option>
+	    <option value="3f2504e0-4f89-11d3-9a0c-0305e82c3301">3f2504e0-4f89-11d3-9a0c-0305e82c3301</option>
+	  </select>
+	  <label for="team">Team</label>
+	  <select id="team" name="team">
+	    <option value="7c9e6679-7425-40de-944b-e07fc1f90ae7">Support</option>
+	    <option value="9b2f1c4a-8e3d-4b6a-9f12-5d7c8e9a0b1c">Billing</option>
+	  </select>
+	  <label for="region">Region</label>
+	  <select id="region" name="region">
+	    <option value="">Choose a region</option>
+	  </select>
+	  <button type="submit">Apply</button>
+	</form>
+	"""
+	return page("Dropdowns", body)
 
 
 @app.get("/form-ok", response_class=HTMLResponse)

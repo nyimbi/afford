@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -48,6 +49,8 @@ func dispatch(args []string) int {
 		return cmdInit(args[1:])
 	case "install":
 		return cmdInstall()
+	case "checks":
+		return cmdChecks(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println("afford " + version)
 		return 0
@@ -67,6 +70,7 @@ func usage() {
   afford mcp --config afford.toml     # MCP server on stdio, for agents
   afford init [--base-url URL] [--path afford.toml]
   afford install          # download the Playwright browser once
+  afford checks [--json]  # every check afford performs, worst first
   afford version
 
 Run options:
@@ -80,7 +84,9 @@ Run options:
   --login-url PATH       login page path (default /login)
   --storage-state PATH   reuse a saved session
   --username NAME        username (or AFFORD_USERNAME)
-  --allow-destructive    click controls whose names look destructive
+  --allow-delete         click controls that delete or erase data
+  --allow-side-effects   click pay/send/publish/logout/approve controls
+  --allow-destructive    both of the above (umbrella)
   --no-submit            never submit a form
   --no-prompt            fail instead of asking for credentials
   --headful              show the browser
@@ -92,7 +98,9 @@ Run options:
 MCP options:
   --config PATH          same configuration as run
   --base-url URL         the origin the server is allowed to open
-  --allow-destructive    allow destructive controls through the agent
+  --allow-delete         allow the agent to delete or erase data
+  --allow-side-effects   allow pay/send/publish/logout controls
+  --allow-destructive    both of the above (umbrella)
   --allow-any-host       drop the SSRF host allowlist (dangerous)
   Credentials are read from AFFORD_USERNAME / AFFORD_PASSWORD; the server
   never prompts.
@@ -114,7 +122,7 @@ func cmdMCP(args []string) int {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var baseURL, configPath, out, authMode, loginURL, storageState string
-	var allowDestructive, allowAnyHost bool
+	var allowDestructive, allowDelete, allowSideEffects, allowAnyHost bool
 
 	fs.StringVar(&baseURL, "base-url", "", "origin the server may open")
 	fs.StringVar(&baseURL, "u", "", "alias for --base-url")
@@ -125,7 +133,9 @@ func cmdMCP(args []string) int {
 	fs.StringVar(&authMode, "auth", "", "none | form | basic | bearer | storage")
 	fs.StringVar(&loginURL, "login-url", "", "login page path")
 	fs.StringVar(&storageState, "storage-state", "", "reuse a saved session")
-	fs.BoolVar(&allowDestructive, "allow-destructive", false, "let the agent click destructive controls")
+	fs.BoolVar(&allowDestructive, "allow-destructive", false, "let the agent click destructive controls (both grants below)")
+	fs.BoolVar(&allowDelete, "allow-delete", false, "let the agent click controls that delete or erase data")
+	fs.BoolVar(&allowSideEffects, "allow-side-effects", false, "let the agent click pay/send/publish/logout controls")
 	fs.BoolVar(&allowAnyHost, "allow-any-host", false, "drop the SSRF host allowlist")
 
 	if err := fs.Parse(args); err != nil {
@@ -154,6 +164,12 @@ func cmdMCP(args []string) int {
 	if allowDestructive {
 		cfg.Safety.AllowDestructive = true
 	}
+	if allowDelete {
+		cfg.Safety.AllowDelete = true
+	}
+	if allowSideEffects {
+		cfg.Safety.AllowSideEffects = true
+	}
 	if allowAnyHost {
 		cfg.MCP.AllowAnyHost = true
 	}
@@ -166,6 +182,31 @@ func cmdMCP(args []string) int {
 		fmt.Fprintf(os.Stderr, "afford: mcp server: %v\n", err)
 		return 3
 	}
+	return 0
+}
+
+func cmdChecks(args []string) int {
+	fs := flag.NewFlagSet("checks", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var asJSON bool
+	fs.BoolVar(&asJSON, "json", false, "print the catalogue as JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	specs := model.Specs()
+	if asJSON {
+		blob, err := json.MarshalIndent(specs, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "afford: %v\n", err)
+			return 3
+		}
+		fmt.Println(string(blob))
+		return 0
+	}
+	for _, spec := range specs {
+		fmt.Printf("%-8s %-30s %s\n", spec.Severity, spec.Code, spec.Title)
+	}
+	fmt.Printf("\n%d checks\n", len(specs))
 	return 0
 }
 
@@ -208,7 +249,7 @@ func cmdRun(args []string) int {
 		maxPages, maxDepth, concurrency, timeoutSecs int
 	)
 	var (
-		allowDestructive, noSubmit, headful, embedImages, noPrompt bool
+		allowDestructive, allowDelete, allowSideEffects, noSubmit, headful, embedImages, noPrompt bool
 	)
 
 	fs.StringVar(&baseURL, "base-url", "", "target application")
@@ -225,7 +266,9 @@ func cmdRun(args []string) int {
 	fs.StringVar(&loginURL, "login-url", "", "login page path")
 	fs.StringVar(&storageState, "storage-state", "", "reuse a saved session")
 	fs.StringVar(&username, "username", "", "username (or AFFORD_USERNAME)")
-	fs.BoolVar(&allowDestructive, "allow-destructive", false, "click destructive controls")
+	fs.BoolVar(&allowDestructive, "allow-destructive", false, "click destructive controls (both grants below)")
+	fs.BoolVar(&allowDelete, "allow-delete", false, "click controls that delete or erase data")
+	fs.BoolVar(&allowSideEffects, "allow-side-effects", false, "click pay/send/publish/logout/approve controls")
 	fs.BoolVar(&noSubmit, "no-submit", false, "never submit a form")
 	fs.BoolVar(&headful, "headful", false, "show the browser")
 	fs.BoolVar(&embedImages, "embed-images", false, "inline screenshots")
@@ -272,6 +315,12 @@ func cmdRun(args []string) int {
 	}
 	if allowDestructive {
 		cfg.Safety.AllowDestructive = true
+	}
+	if allowDelete {
+		cfg.Safety.AllowDelete = true
+	}
+	if allowSideEffects {
+		cfg.Safety.AllowSideEffects = true
 	}
 	if noSubmit {
 		cfg.Safety.SubmitForms = false

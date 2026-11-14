@@ -52,10 +52,52 @@ found = {f["code"] for f in payload["findings"]}
 expected = {
     "E_DEAD_CONTROL", "E_EMPTY_HREF", "E_UNCAUGHT", "E_CONSOLE_ERROR",
     "E_OVERFLOW_X", "E_UNLABELED_CONTROL", "E_HTTP_4XX", "E_500_ON_ACTION",
-    "E_500_ON_VALID", "E_VALIDATION_NOT_ENFORCED",
+    "E_500_ON_VALID", "E_VALIDATION_NOT_ENFORCED", "E_DEAD_LINK",
+    "E_UUID_EXPOSED", "E_UUID_IN_OPTION_VALUE", "E_EMPTY_SELECT",
+    "E_DESTRUCTIVE_SKIPPED",
 }
 missing = expected - found
 if missing:
     raise SystemExit(f"canary: missing {sorted(missing)}\nfound {sorted(found)}")
-print(f"canary ok: {len(expected)}/{len(expected)} planted defects found")
+
+kinds = {f["detail"].get("kind") for f in payload["findings"]
+         if f["code"] == "E_DESTRUCTIVE_SKIPPED"}
+if not {"delete", "side_effect"} <= kinds:
+    raise SystemExit(f"canary: destructive classes not distinguished: {kinds}")
+print(f"canary ok: {len(expected)}/{len(expected)} planted defects found, "
+      f"permission classes {sorted(kinds)}")
+PY
+
+# The deletion grant must actually be wired, and must not leak into the
+# side-effect class. Seed at /dashboard so the run is short.
+OUT2="$(mktemp -d)"
+AFFORD_USERNAME=admin AFFORD_PASSWORD=secret \
+	go run ./cmd/afford run \
+		--config fixtures/canary/afford.toml \
+		--base-url "http://127.0.0.1:$PORT/dashboard" \
+		--allow-delete --max-pages 2 \
+		--no-prompt --quiet --fail-on never --out "$OUT2"
+
+python3 - "$OUT2" <<'PY'
+import glob
+import json
+import sys
+
+reports = sorted(glob.glob(sys.argv[1] + "/runs/*/report.json"))
+if not reports:
+    raise SystemExit("canary: --allow-delete run wrote no report")
+payload = json.load(open(reports[-1]))
+clicked = any(
+    f["code"] == "E_DEAD_CONTROL" and "Delete order" in (f.get("element") or "")
+    for f in payload["findings"]
+)
+still_skipped = any(
+    f["code"] == "E_DESTRUCTIVE_SKIPPED" and "Publish" in (f.get("element") or "")
+    for f in payload["findings"]
+)
+if not clicked:
+    raise SystemExit("canary: --allow-delete did not click the deletion control")
+if not still_skipped:
+    raise SystemExit("canary: --allow-delete leaked into the side-effect class")
+print("canary ok: --allow-delete clicks deletion, side effects stay quarantined")
 PY

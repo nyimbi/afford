@@ -30,6 +30,17 @@ produces. Inputs are filled with a battery derived from the field's own declared
 type and constraints; forms are submitted once empty-required and once with valid
 values.
 
+Dropdowns are audited: an option whose visible label is a UUID or ULID is reported,
+as are UUID option values and a select with nothing to choose. Links are checked by
+clicking them, so both 4xx/5xx targets and SPA "soft 404s" — HTTP 200 with "page not
+found" text — are caught. Every page gets a full-page screenshot and two timings:
+the browser load event, and the settled time when afford's quiet-network and
+quiet-DOM criteria are met.
+
+`report.html` opens with a filterable page table — thumbnail, status, load, settled,
+controls, probes, findings — followed by the findings with their evidence. `afford
+checks` prints every check the tool performs.
+
 It does not prove business rules are correct. It proves the affordances it could
 reach did not crash, fail, or go inert, and it prints what it did not test.
 
@@ -57,19 +68,22 @@ Three tools: `inspect_page` (capture only, never interacts), `check_page` (click
 optionally submit), `crawl_site` (bounded whole-site sweep that writes a report). Results
 carry structured findings, probe counts and the path to a screenshot.
 
-The safety posture belongs to the server, not the caller: destructive controls stay
-quarantined, forms are not submitted unless asked, the URL host allowlist blocks an agent
-from aiming the browser at arbitrary hosts, and credentials come from the server's
-environment rather than tool arguments. Wiring, arguments and the agent flow are in
+The safety posture belongs to the server, not the caller: deletion needs
+`--allow-delete`, other irreversible actions need `--allow-side-effects`, forms are not
+submitted unless a call asks, the URL host allowlist blocks an agent from aiming the
+browser at arbitrary hosts, and credentials come from the server's environment rather
+than tool arguments. Wiring, arguments and the agent flow are in
 [`docs/mcp.md`](docs/mcp.md).
 
 ## Safety
 
-Clicks mutate state. By default the tool refuses to activate controls whose names
-match a destructive vocabulary (`delete`, `reset`, `pay`, `send`, `publish`,
-`logout`, …) and reports them as skipped so coverage stays honest.
+Clicks mutate state. Creation is governed by form submission; deletion and other
+irreversible actions are separate, explicit grants, and every skipped control is
+reported so coverage stays honest.
 
-- `--allow-destructive` — opt in, on a disposable environment only
+- `--allow-delete` — click controls that delete or erase data
+- `--allow-side-effects` — click pay/send/publish/approve/logout controls
+- `--allow-destructive` — both grants at once, on a disposable environment only
 - `--no-submit` — fill and validate without ever submitting a form
 - `--max-pages`, `--max-depth`, `--timeout` — hard budgets
 - Links off-origin or excluded by `[scope]` are recorded, never followed

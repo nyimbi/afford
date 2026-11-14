@@ -7,6 +7,7 @@ package model
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -70,6 +71,16 @@ var specs = []FindingSpec{
 		"Recorded for coverage. Disabled controls are not evidence that the underlying action works."},
 	{"E_UNLABELED_CONTROL", Minor, "Form control has no accessible name",
 		"No label, aria-label or aria-labelledby. Screen readers announce it as an unnamed edit field."},
+	{"E_UUID_EXPOSED", Minor, "Internal identifier shown in a dropdown",
+		"A select option's visible label is a UUID or ULID. The user is shown a database key where a human-readable name belongs, and the key leaks into screenshots, exports and support tickets."},
+	{"E_UUID_IN_OPTION_VALUE", Info, "Dropdown option values are internal identifiers",
+		"Option labels are readable but their values are UUIDs or ULIDs. Often intentional in a form, but it puts internal keys in the DOM, logs and any client-side state."},
+	{"E_EMPTY_SELECT", Minor, "Dropdown has nothing to choose",
+		"A visible, enabled select has no selectable option: every option is a placeholder, disabled, or absent. The user is shown a control that cannot be used. A select that is meant to stay empty until another field changes should be disabled until then."},
+	{"E_SCREENSHOT_FAILED", Info, "Screenshot could not be captured",
+		"The page was visited but no image was written, so the visual record for this route is missing. Usually a browser crash or a page that never stabilised."},
+	{"E_DEAD_LINK", Major, "Dead link",
+		"Clicking this anchor navigated to an error status, or to a page that says it could not find what the link promised. The target is missing, moved, or the route was removed without the link."},
 	{"E_EMPTY_HREF", Minor, "Link points nowhere",
 		"href is '#', empty, or javascript:void(0). It looks navigable and is not."},
 	{"E_ALERT", Minor, "Native alert/confirm/prompt used",
@@ -97,7 +108,7 @@ var specs = []FindingSpec{
 	{"E_FORM_NO_SUBMIT", Info, "Form has no submit control",
 		"Enter may still submit it. Recorded for coverage."},
 	{"E_DESTRUCTIVE_SKIPPED", Info, "Destructive control skipped",
-		"The control's name matched the destructive vocabulary, so it was not clicked. Pass --allow-destructive on a disposable environment to include it."},
+		"The control's name matched the destructive vocabulary, so it was not clicked. Deletion needs --allow-delete; paying, sending, publishing and logging out need --allow-side-effects. --allow-destructive grants both. Only do that on an environment whose data can be thrown away."},
 	{"E_OUT_OF_SCOPE", Info, "Link outside scope not followed",
 		"Off-origin or excluded by the include/exclude rules."},
 }
@@ -150,6 +161,20 @@ func (f Finding) Rank() int {
 		return r
 	}
 	return 9
+}
+
+// Specs returns the catalogue sorted worst-first, for `afford checks` and docs.
+func Specs() []FindingSpec {
+	out := make([]FindingSpec, 0, len(specs))
+	out = append(out, specs...)
+	sort.Slice(out, func(i, j int) bool {
+		ri, rj := SeverityOrder[out[i].Severity], SeverityOrder[out[j].Severity]
+		if ri != rj {
+			return ri < rj
+		}
+		return out[i].Code < out[j].Code
+	})
+	return out
 }
 
 // Key identifies a defect independently of the page it was seen on, so shared
@@ -291,6 +316,9 @@ type Page struct {
 	Parent       string    `json:"parent,omitempty"`
 	Status       int       `json:"status,omitempty"`
 	Title        string    `json:"title"`
+	LoadMS       int64     `json:"load_ms"`
+	SettledMS    int64     `json:"settled_ms"`
+	Controls     int       `json:"controls"`
 	Screenshot   string    `json:"screenshot,omitempty"`
 	VisitedAt    time.Time `json:"visited_at"`
 	Probes       int       `json:"probes"`

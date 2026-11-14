@@ -195,7 +195,7 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []string {
 		r.bump(r.notTested, "DOM scan failed", 1)
 		return nil
 	}
-	screenshotRel := r.shoot(page, url)
+	screenshotRel, shotErr := r.shoot(page, url)
 	status := 0
 	if load.OK {
 		status = load.Status
@@ -205,21 +205,22 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []string {
 		r.mu.Unlock()
 	}
 
-	r.store.AddPage(model.Page{
-		URL: url, Template: discover.Template(url), Depth: item.Depth,
-		Parent: item.Parent, Status: status, Title: scanResult.Title,
-		Screenshot: screenshotRel, AuthRedirect: authRedirect,
-	})
-	r.mu.Lock()
-	r.stats.pagesVisited++
-	r.mu.Unlock()
-
 	visible := make([]model.Element, 0, len(scanResult.Controls))
 	for _, c := range scanResult.Controls {
 		if c.Visible {
 			visible = append(visible, c)
 		}
 	}
+	r.store.AddPage(model.Page{
+		URL: url, Template: discover.Template(url), Depth: item.Depth,
+		Parent: item.Parent, Status: status, Title: scanResult.Title,
+		LoadMS: load.LoadMS, SettledMS: load.SettledMS, Controls: len(visible),
+		Screenshot: screenshotRel, AuthRedirect: authRedirect,
+	})
+	r.mu.Lock()
+	r.stats.pagesVisited++
+	r.mu.Unlock()
+
 	textSample, _ := page.Evaluate("() => (document.body ? document.body.innerText : '').slice(0, 1500)")
 	sample, _ := textSample.(string)
 	obs := model.Observation{
@@ -244,6 +245,14 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []string {
 	}
 	r.emit(url, "capture", obs, "capture", nil)
 	for _, f := range append(oracles.Unlabeled(visible, url), oracles.EmptyHref(visible, url)...) {
+		r.store.AddFinding(f)
+	}
+	for _, f := range oracles.OptionsAudit(visible, url) {
+		r.store.AddFinding(f)
+	}
+	if shotErr != nil {
+		f := model.NewFinding("E_SCREENSHOT_FAILED", url)
+		f.Detail["error"] = shotErr.Error()
 		r.store.AddFinding(f)
 	}
 
@@ -271,14 +280,14 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []string {
 	return discovered
 }
 
-func (r *Runner) shoot(page playwright.Page, url string) string {
+func (r *Runner) shoot(page playwright.Page, url string) (string, error) {
 	sum := sha1.Sum([]byte(url))
 	relative := "screenshots/" + hex.EncodeToString(sum[:])[:12] + ".png"
 	path := filepath.Join(r.baseDir, relative)
 	if _, err := browser.Screenshot(page, path); err != nil {
-		return ""
+		return "", err
 	}
-	return relative
+	return relative, nil
 }
 
 func (r *Runner) emit(pageURL, kind string, obs model.Observation, contextKind string, el *model.Element) {
@@ -343,12 +352,14 @@ func (r *Runner) probeControls(
 				continue
 			}
 		}
-		if payloads.IsDestructive(el, r.cfg.Safety.ExtraDestructive) && !r.cfg.Safety.AllowDestructive {
+		if kind := payloads.DestructiveKind(el, r.cfg.Safety.ExtraDestructive); kind != "" &&
+			!r.cfg.Safety.Permits(kind) {
 			f := model.NewFinding("E_DESTRUCTIVE_SKIPPED", url)
 			f.Element = fmt.Sprintf("%s “%s”", el.Tag, el.Name)
-			f.Detail["reason"] = "destructive vocabulary match"
+			f.Detail["kind"] = kind
+			f.Detail["required_flag"] = payloads.OptInFlag(kind)
 			r.store.AddFinding(f)
-			r.bump(r.skipped, "destructive control", 1)
+			r.bump(r.skipped, kind+" control", 1)
 			continue
 		}
 		attempts++
@@ -405,11 +416,17 @@ func (r *Runner) probeForms(page playwright.Page, collector *browser.Collector, 
 			r.bump(r.skipped, "form submission disabled", 1)
 			continue
 		}
-		if submitEl, ok := controls[form.SubmitIdx[0]]; ok &&
-			payloads.IsDestructive(submitEl, r.cfg.Safety.ExtraDestructive) &&
-			!r.cfg.Safety.AllowDestructive {
-			r.bump(r.skipped, "destructive submit control", 1)
-			continue
+		if submitEl, ok := controls[form.SubmitIdx[0]]; ok {
+			if kind := payloads.DestructiveKind(submitEl, r.cfg.Safety.ExtraDestructive); kind != "" &&
+				!r.cfg.Safety.Permits(kind) {
+				f := model.NewFinding("E_DESTRUCTIVE_SKIPPED", url)
+				f.Element = fmt.Sprintf("%s “%s”", submitEl.Tag, submitEl.Name)
+				f.Detail["kind"] = kind
+				f.Detail["required_flag"] = payloads.OptInFlag(kind)
+				r.store.AddFinding(f)
+				r.bump(r.skipped, kind+" submit control", 1)
+				continue
+			}
 		}
 		requiredPresent := false
 		for _, idx := range form.ControlIdx {

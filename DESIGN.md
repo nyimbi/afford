@@ -77,9 +77,13 @@ no unit test can see: the handler is not wired. Occlusion by an overlay is check
 
 Against a real app, clicks create records, send mail, and charge cards. Therefore:
 
-- **Destructive controls are quarantined by default** — name matches
-  `delete|remove|destroy|purge|reset|pay|checkout|send|publish|deploy|logout|revoke|…` —
-  and reported as skipped, with the reason, so coverage stays honest.
+- **Mutation is granted by class, not by a single switch.** Submitting a form (creation)
+  is `submit_forms` / `submit: true`. Deleting or erasing data is `allow_delete`. Paying,
+  sending, publishing, approving and logging out is `allow_side_effects`.
+  `allow_destructive` is the umbrella. Every skipped control is reported with the flag
+  that would have allowed it, so coverage stays honest.
+- Matching is on word boundaries: a substring rule quarantined a nav link called
+  "dropdown" because it contains "drop".
 - **`--no-submit`** fills and validates without ever submitting.
 - **Network egress** stays on `allow_hosts`; off-origin links are recorded, not followed.
 - Credentials come from a TTY prompt, `AFFORD_USERNAME`/`AFFORD_PASSWORD`, or a storage-state
@@ -97,9 +101,13 @@ response status and URL, DOM excerpt, screenshot). Only deterministic predicates
 - framework error-boundary text (React/Next/Vue)
 - horizontal overflow at the configured viewport
 - dead control, occluded control, unlabeled control, empty `href`
+- dead link: 4xx/5xx target, or a soft 404 (200 with "page not found" text)
+- internal identifiers shown in a dropdown: UUID/ULID labels, UUID option values
+- a visible, enabled select with nothing to choose
 - 5xx or navigation-to-error *caused by* a click
 - empty-required submit that proceeds anyway
 - direct navigation that does not reproduce a page reached by clicking
+- missing screenshot, recorded rather than swallowed
 
 ## Failure modes the tool must avoid
 

@@ -33,13 +33,18 @@ var semantics = []semantic{
 	{"text", regexp.MustCompile(`.`)},
 }
 
-var destructive = []string{
+// Deleting or erasing data is its own permission: --allow-delete.
+var deletionWords = []string{
 	"delete", "remove", "destroy", "drop", "truncate", "purge", "wipe", "erase",
-	"reset", "clear all", "pay", "payment", "purchase", "buy", "checkout",
-	"place order", "send", "publish", "deploy", "release", "logout", "log out",
-	"sign out", "signout", "unsubscribe", "archive", "deactivate", "revoke",
-	"terminate", "cancel", "refund", "transfer", "withdraw", "close account",
-	"approve", "reject",
+	"reset", "clear all", "deactivate", "revoke", "terminate", "close account",
+	"cancel order", "cancel subscription", "cancel account",
+}
+
+// Irreversible effects that are not deletion: --allow-side-effects.
+var sideEffectWords = []string{
+	"pay", "payment", "purchase", "buy", "checkout", "place order", "send",
+	"publish", "deploy", "release", "logout", "log out", "sign out", "signout",
+	"unsubscribe", "archive", "refund", "transfer", "withdraw", "approve", "reject",
 }
 
 var numberRe = regexp.MustCompile(`^-?\d+(\.\d+)?$`)
@@ -195,22 +200,75 @@ func Sweep(el model.Element, depth string) []Payload {
 	return out
 }
 
-// IsDestructive is the safety gate: a name matched here is not clicked unless
-// the operator opted in.
-func IsDestructive(el model.Element, extra []string) bool {
+// The vocabulary is compiled on word boundaries. Substring matching quarantined
+// a nav link called "dropdown" because it contains "drop".
+var (
+	deletionRes   = compilePhrases(deletionWords)
+	sideEffectRes = compilePhrases(sideEffectWords)
+)
+
+func compilePhrases(words []string) []*regexp.Regexp {
+	out := make([]*regexp.Regexp, 0, len(words))
+	for _, word := range words {
+		if re := phraseRegexp(word); re != nil {
+			out = append(out, re)
+		}
+	}
+	return out
+}
+
+func phraseRegexp(word string) *regexp.Regexp {
+	parts := strings.Fields(strings.ToLower(strings.TrimSpace(word)))
+	if len(parts) == 0 {
+		return nil
+	}
+	quoted := make([]string, len(parts))
+	for i, part := range parts {
+		quoted[i] = regexp.QuoteMeta(part)
+	}
+	re, err := regexp.Compile(`\b` + strings.Join(quoted, `[\s\-_]*`) + `\b`)
+	if err != nil {
+		return nil
+	}
+	return re
+}
+
+// DestructiveKind classifies a control's permission class: "delete",
+// "side_effect", or "" for an ordinary control. Extra patterns from config are
+// treated as deletion, the stricter grant.
+func DestructiveKind(el model.Element, extra []string) string {
 	blob := strings.ToLower(strings.Join([]string{el.Name, el.NameAttr, el.Placeholder}, " "))
-	for _, word := range destructive {
-		if word != "" && strings.Contains(blob, word) {
-			return true
+	for _, re := range deletionRes {
+		if re.MatchString(blob) {
+			return "delete"
+		}
+	}
+	for _, re := range sideEffectRes {
+		if re.MatchString(blob) {
+			return "side_effect"
 		}
 	}
 	for _, word := range extra {
-		w := strings.ToLower(strings.TrimSpace(word))
-		if w != "" && strings.Contains(blob, w) {
-			return true
+		if re := phraseRegexp(word); re != nil && re.MatchString(blob) {
+			return "delete"
 		}
 	}
-	return strings.TrimSpace(el.Attrs["data-confirm"]) != ""
+	if strings.TrimSpace(el.Attrs["data-confirm"]) != "" {
+		return "delete"
+	}
+	return ""
+}
+
+func IsDestructive(el model.Element, extra []string) bool {
+	return DestructiveKind(el, extra) != ""
+}
+
+// OptInFlag names the flag an operator would pass to allow this class.
+func OptInFlag(kind string) string {
+	if kind == "delete" {
+		return "--allow-delete"
+	}
+	return "--allow-side-effects"
 }
 
 func EmptyRequired(el model.Element) bool {

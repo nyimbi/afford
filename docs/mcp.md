@@ -23,8 +23,10 @@ never from tool arguments (those land in the host's transcript).
 `no_screenshot`, `max_controls`. `crawl_site`: `max_pages` (default 25), `max_depth`
 (default 2), `depth`, `submit`.
 
-Every result carries `structuredContent` (findings, counts, probe counts, screenshot
-path) and a short text digest an agent can read directly.
+Every result carries `structuredContent` (findings, counts, probe counts, `load_ms`,
+`settled_ms`, screenshot path) and a short text digest an agent can read directly.
+`load_ms` is the browser's load event; `settled_ms` is when the page stopped changing
+under afford's quiet-network and quiet-DOM criteria.
 
 ## Wiring it into Claude Code
 
@@ -59,10 +61,13 @@ committed. Prefer the shell environment or a launcher script.
 
 An agent does not get a wider blast radius than a human running the CLI:
 
-- **Destructive controls are quarantined** unless the server started with
-  `--allow-destructive`.
-- **Forms are not submitted** unless the call passes `submit: true`; inputs are still
-  filled and validated, which is where most client-side defects surface.
+- **Deletion is a separate, explicit grant**: `--allow-delete`. Paying, sending,
+  publishing, approving and logging out need `--allow-side-effects`.
+  `--allow-destructive` is the umbrella for both. A skipped control still appears in
+  the result, with a note naming the flag that would have allowed it.
+- **Creation is governed by form submission**: forms are not submitted unless the call
+  passes `submit: true`; inputs are still filled and validated, which is where most
+  client-side defects surface.
 - **The URL allowlist is enforced.** `check_page` refuses hosts other than the configured
   origin and `[scope] allow_hosts`, so a prompt-injected agent cannot point a real browser
   at `http://169.254.169.254/` or an internal admin panel. `--allow-any-host` drops that
