@@ -77,22 +77,24 @@ func ResolveCredentials(cfg config.Config, allowPrompt bool) (Credentials, error
 // Authenticate returns everything the workers need to start logged in.
 func Authenticate(host *browser.Host, cfg config.Config, allowPrompt bool) (Result, error) {
 	patterns := cfg.Auth.LoginPathPatterns
+	// Extra headers apply to every mode, not only bearer: staging proxies and
+	// preview hosts routinely want a header on each request.
+	headers := map[string]string{}
+	for key, value := range cfg.Auth.ExtraHeaders {
+		headers[key] = value
+	}
 	switch cfg.Auth.Mode {
 	case "none":
-		return Result{Note: "no auth"}, nil
+		return Result{Headers: headers, Note: "no auth"}, nil
 	case "storage":
 		if _, err := os.Stat(cfg.Auth.StorageState); err != nil {
 			return Result{}, fmt.Errorf("storage state file not found: %s", cfg.Auth.StorageState)
 		}
-		return Result{StatePath: cfg.Auth.StorageState, Note: "reused storage state"}, nil
+		return Result{StatePath: cfg.Auth.StorageState, Headers: headers, Note: "reused storage state"}, nil
 	case "bearer":
 		token := os.Getenv(cfg.Auth.PasswordEnv)
 		if token == "" {
 			return Result{}, fmt.Errorf("bearer token not found: set %s", cfg.Auth.PasswordEnv)
-		}
-		headers := map[string]string{}
-		for k, v := range cfg.Auth.ExtraHeaders {
-			headers[k] = v
 		}
 		if _, ok := headers["Authorization"]; !ok {
 			headers["Authorization"] = "Bearer " + token
@@ -106,8 +108,9 @@ func Authenticate(host *browser.Host, cfg config.Config, allowPrompt bool) (Resu
 	}
 	if cfg.Auth.Mode == "basic" {
 		return Result{
-			Creds: &playwright.HttpCredentials{Username: creds.Username, Password: creds.Password},
-			Note:  "http basic",
+			Creds:   &playwright.HttpCredentials{Username: creds.Username, Password: creds.Password},
+			Headers: headers,
+			Note:    "http basic",
 		}, nil
 	}
 
@@ -121,7 +124,7 @@ func Authenticate(host *browser.Host, cfg config.Config, allowPrompt bool) (Resu
 		return Result{}, err
 	}
 	_ = patterns
-	return Result{StatePath: statePath, Note: "form login ok"}, nil
+	return Result{StatePath: statePath, Headers: headers, Note: "form login ok"}, nil
 }
 
 func FormLogin(ctx playwright.BrowserContext, cfg config.Config, creds Credentials) (string, error) {

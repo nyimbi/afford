@@ -13,6 +13,7 @@ import (
 
 	"afford/internal/config"
 	"afford/internal/model"
+	"afford/internal/sanitize"
 )
 
 type Host struct {
@@ -27,12 +28,23 @@ func New(cfg config.Config) (*Host, error) {
 		return nil, fmt.Errorf("start playwright driver: %w (run `afford install` once)", err)
 	}
 	headless := !cfg.Run.Headful
-	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
+	browserType := pw.Chromium
+	switch strings.ToLower(cfg.Run.Browser) {
+	case "", "chromium":
+	case "firefox":
+		browserType = pw.Firefox
+	case "webkit":
+		browserType = pw.WebKit
+	default:
+		_ = pw.Stop()
+		return nil, fmt.Errorf("unsupported browser %q (chromium, firefox or webkit)", cfg.Run.Browser)
+	}
+	browser, err := browserType.Launch(playwright.BrowserTypeLaunchOptions{
 		Headless: playwright.Bool(headless),
 	})
 	if err != nil {
 		_ = pw.Stop()
-		return nil, fmt.Errorf("launch chromium: %w", err)
+		return nil, fmt.Errorf("launch %s: %w", cfg.Run.Browser, err)
 	}
 	return &Host{cfg: cfg, pw: pw, Browser: browser}, nil
 }
@@ -117,7 +129,7 @@ func (c *Collector) Bind(page playwright.Page) {
 		req := resp.Request()
 		c.mu.Lock()
 		c.Requests = append(c.Requests, model.RequestRecord{
-			URL:          req.URL(),
+			URL:          sanitize.URL(req.URL()),
 			Method:       req.Method(),
 			ResourceType: req.ResourceType(),
 			Kind:         kindOf(req.ResourceType()),
@@ -132,7 +144,7 @@ func (c *Collector) Bind(page playwright.Page) {
 		}
 		c.mu.Lock()
 		c.Requests = append(c.Requests, model.RequestRecord{
-			URL:          req.URL(),
+			URL:          sanitize.URL(req.URL()),
 			Method:       req.Method(),
 			ResourceType: req.ResourceType(),
 			Kind:         kindOf(req.ResourceType()),

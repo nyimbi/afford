@@ -9,6 +9,7 @@ Go 1.22+, stdlib plus Playwright-Go. No cgo.
 - `Collector.Reset()` at the top of every probe. An observation that inherits the previous probe's events is the bug the canary caught once already.
 - A page's load-time errors are the capture pass's; action observations start from the post-load baseline.
 - Findings merge across pages by `(code, element, detail signature)` so shared chrome is one finding with N locations, not N findings.
+- Docs: `docs/user-guide.md`, `docs/contributing.md`, `docs/architecture.md`. The catalogue in `internal/model` is authoritative; the guide mirrors it.
 - Commands: `make build`, `make test`, `make vet`, `make canary`, `make mcp-smoke`, `make install`.
 - The MCP server (`internal/mcpserver`) is a second entry point over the same `check`/`run` code. It must never prompt, never widen the safety posture beyond the CLI's, and must keep `internal/check`'s URL allowlist intact.
 - MCP tool failures return a Go error, not a zero output struct: the SDK validates structured output against the inferred schema even on error results, so a zero struct with nil maps fails the call.

@@ -305,30 +305,6 @@ func globToRegexp(pattern string) string {
 	return b.String()
 }
 
-var secretQuery = regexp.MustCompile(`(?i)token|key|secret|password|auth|session|code`)
-
-// RedactURL masks query values that look like credentials before they reach
-// the report.
-func RedactURL(raw string) string {
-	u, err := parseURL(raw)
-	if err != nil {
-		return raw
-	}
-	q := u.Query()
-	changed := false
-	for key := range q {
-		if secretQuery.MatchString(key) {
-			q.Set(key, "***")
-			changed = true
-		}
-	}
-	if !changed {
-		return raw
-	}
-	u.RawQuery = q.Encode()
-	return u.String()
-}
-
 func SortedKeys(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

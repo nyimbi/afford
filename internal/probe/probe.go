@@ -17,6 +17,7 @@ import (
 	"afford/internal/discover"
 	"afford/internal/model"
 	"afford/internal/payloads"
+	"afford/internal/sanitize"
 	"afford/internal/uploads"
 )
 
@@ -351,15 +352,16 @@ func capturePopups(pages []playwright.Page, cfg config.Config, shotDir string) [
 		if i >= limit {
 			break
 		}
-		result := model.PopupResult{URL: popup.URL()}
-		if !discover.InScope(result.URL, cfg) {
+		rawURL := popup.URL()
+		result := model.PopupResult{URL: sanitize.URL(rawURL)}
+		if !discover.InScope(rawURL, cfg) {
 			out = append(out, result)
 			continue
 		}
 		collector := &browser.Collector{}
 		collector.Bind(popup)
 		browser.Settle(popup, cfg)
-		result.URL = popup.URL()
+		result.URL = sanitize.URL(rawURL)
 		scanResult, err := discover.Scan(popup)
 		if err == nil {
 			result.Title = scanResult.Title

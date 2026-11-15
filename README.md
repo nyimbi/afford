@@ -163,6 +163,13 @@ are `[run] depth` (`smoke` — one payload per input; `standard` — boundaries 
 unicode; `deep` — injection sentinels), `[limits] concurrency`, `[uploads]` for file
 fixtures, `[popups] mode` (`capture` or `off`), `[visual]`, and the `[safety]` grants.
 
+## Documentation
+
+- [User guide](docs/user-guide.md): install, configure, run, read reports, use MCP, run in CI.
+- [Contributor guide](docs/contributing.md): invariants, adding a check, testing and debugging.
+- [Architecture](docs/architecture.md): components, data flow, probing, oracles, security and trade-offs.
+- [CI](docs/ci.md) and [MCP](docs/mcp.md): focused references.
+
 ## Development
 
 ```sh

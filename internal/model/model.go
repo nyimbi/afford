@@ -28,10 +28,10 @@ var SeverityOrder = map[Severity]int{
 }
 
 type FindingSpec struct {
-	Code     string
-	Severity Severity
-	Title    string
-	Why      string
+	Code     string   `json:"code"`
+	Severity Severity `json:"severity"`
+	Title    string   `json:"title"`
+	Why      string   `json:"why"`
 }
 
 var specs = []FindingSpec{

@@ -28,6 +28,7 @@ import (
 	"afford/internal/oracles"
 	"afford/internal/payloads"
 	"afford/internal/probe"
+	"afford/internal/sanitize"
 	"afford/internal/store"
 	"afford/internal/visual"
 )
@@ -160,7 +161,18 @@ func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary,
 				defer wg.Done()
 				ctx := <-pool
 				defer func() { pool <- ctx }()
-				urls := r.visit(ctx, it)
+				var urls []found
+				func() {
+					defer func() {
+						if rec := recover(); rec != nil {
+							f := model.NewFinding("E_HARNESS_TIMEOUT", it.URL)
+							f.Detail["error"] = fmt.Sprint(rec)
+							f.Evidence = []string{"panic during page visit: " + fmt.Sprint(rec)}
+							r.store.AddFinding(f)
+						}
+					}()
+					urls = r.visit(ctx, it)
+				}()
 				discovered <- urls
 			}(item)
 		}
@@ -356,7 +368,7 @@ func (r *Runner) auditLinks(controls []model.Element, base string) {
 		}
 		seen[key] = true
 		r.store.AddLink(model.LinkRecord{
-			Source: base, Href: el.Href, Resolved: resolved,
+			Source: base, Href: el.Href, Resolved: sanitize.URL(resolved),
 			Disposition: disposition, Reason: reason,
 		})
 		if disposition == "excluded" || disposition == "off_origin" {

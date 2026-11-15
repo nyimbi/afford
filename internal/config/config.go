@@ -135,7 +135,7 @@ func Default() Config {
 	return Config{
 		Run: RunConfig{
 			Out: ".afford", Depth: "standard", Viewport: []int{1280, 900},
-			Seed: 7, Browser: "chromium", TimeoutSecs: 900,
+			Browser: "chromium", TimeoutSecs: 900,
 		},
 		Scope: ScopeConfig{
 			Include: []string{"/**"},
@@ -180,6 +180,11 @@ func (c *Config) Validate() error {
 	case "smoke", "standard", "deep":
 	default:
 		problems = append(problems, "run.depth must be smoke, standard or deep")
+	}
+	switch strings.ToLower(c.Run.Browser) {
+	case "", "chromium", "firefox", "webkit":
+	default:
+		problems = append(problems, "run.browser must be chromium, firefox or webkit")
 	}
 	switch c.Popups.Mode {
 	case "capture", "off":
