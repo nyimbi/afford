@@ -18,9 +18,10 @@ import (
 )
 
 type Payload struct {
-	Summary  model.Summary   `json:"summary"`
-	Pages    []model.Page    `json:"pages"`
-	Findings []model.Finding `json:"findings"`
+	Summary  model.Summary      `json:"summary"`
+	Pages    []model.Page       `json:"pages"`
+	Findings []model.Finding    `json:"findings"`
+	Links    []model.LinkRecord `json:"links"`
 }
 
 func Write(st *store.Store, runID, baseDir string, summary model.Summary, embed bool) (string, error) {
@@ -34,7 +35,7 @@ func Write(st *store.Store, runID, baseDir string, summary model.Summary, embed 
 		}
 		return findings[i].Code < findings[j].Code
 	})
-	payload := Payload{Summary: summary, Pages: pages, Findings: findings}
+	payload := Payload{Summary: summary, Pages: pages, Findings: findings, Links: st.LinkRecords()}
 
 	blob, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
@@ -110,6 +111,13 @@ td.bad{color:var(--critical);font-weight:650}
 .dot.blocker{background:var(--blocker)} .dot.critical{background:var(--critical)}
 .dot.major{background:var(--major)} .dot.minor{background:var(--minor)} .dot.info{background:var(--info)}
 .empty{color:var(--muted);font-size:14px;padding:18px 0}
+.visual{display:flex;flex-direction:column;gap:16px}
+.vcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.trio{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px}
+.trio figure{margin:0}
+.trio img{width:100%;border:1px solid var(--line);border-radius:6px;background:var(--chip)}
+.trio figcaption{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
+@media (max-width:720px){.trio{grid-template-columns:1fr}}
 .limits{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 18px}
 .limits li{color:var(--muted);font-size:13.5px;margin:3px 0}
 `
@@ -165,6 +173,12 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	}
 	b.WriteString("</div>")
 
+	var visualDiffs []model.Finding
+	for _, f := range p.Findings {
+		if f.Code == "E_VISUAL_DIFF" {
+			visualDiffs = append(visualDiffs, f)
+		}
+	}
 	shotCount := 0
 	loads := make([]int64, 0, len(p.Pages))
 	settled := make([]int64, 0, len(p.Pages))
@@ -190,6 +204,8 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 		{"Forms", fmt.Sprintf("%d/%d", p.Summary.FormsProbed, p.Summary.FormsTotal)},
 		{"Inputs swept", fmt.Sprint(p.Summary.InputsSwept)},
 		{"Payloads sent", fmt.Sprint(p.Summary.PayloadsSent)},
+		{"Links skipped", fmt.Sprint(len(p.Links))},
+		{"Visual diffs", fmt.Sprint(len(visualDiffs))},
 		{"Load p50 / p95", fmt.Sprintf("%d / %d ms", percentile(loads, 50), percentile(loads, 95))},
 		{"Settled p50 / p95", fmt.Sprintf("%d / %d ms", percentile(settled, 50), percentile(settled, 95))},
 	}
@@ -298,6 +314,61 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	}
 	b.WriteString("</tbody></table>")
 
+	if len(visualDiffs) > 0 {
+		b.WriteString("<h2>Visual changes</h2><div class='visual'>")
+		for _, f := range visualDiffs {
+			fmt.Fprintf(&b, "<article class='vcard'><h3><a href='%s'>%s</a></h3>", esc(f.PageURL), esc(f.PageURL))
+			fmt.Fprintf(&b, "<div class='meta'>%.3f%% of pixels changed", detailFloat(f.Detail, "pct"))
+			if changed, ok := f.Detail["changed_pixels"]; ok {
+				fmt.Fprintf(&b, " · %v pixels", changed)
+			}
+			if flag, _ := f.Detail["size_changed"].(bool); flag {
+				b.WriteString(" · page size changed")
+			}
+			b.WriteString("</div><div class='trio'>")
+			for _, label := range []string{"baseline", "current", "diff"} {
+				path, _ := f.Detail[label].(string)
+				if path == "" {
+					continue
+				}
+				src := path
+				if embed {
+					if blob, err := os.ReadFile(filepath.Join(baseDir, path)); err == nil {
+						src = "data:image/png;base64," + base64.StdEncoding.EncodeToString(blob)
+					}
+				}
+				fmt.Fprintf(&b, "<figure><img loading='lazy' src='%s' alt='%s'>",
+					esc(src), esc(label))
+				fmt.Fprintf(&b, "<figcaption>%s</figcaption></figure>", esc(label))
+			}
+			b.WriteString("</div></article>")
+		}
+		b.WriteString("</div>")
+	}
+
+	b.WriteString("<h2>Links not crawled</h2>")
+	if len(p.Links) == 0 {
+		b.WriteString("<p class='meta'>every link the crawler saw was followed</p>")
+	} else {
+		b.WriteString("<p class='meta'>Recorded so the scope is visible: these links were seen and deliberately not followed.</p>")
+		b.WriteString("<table><thead><tr><th>Disposition</th><th>Link</th><th>Found on</th><th>Reason</th></tr></thead><tbody>")
+		shown := 0
+		for _, link := range p.Links {
+			if shown >= 200 {
+				fmt.Fprintf(&b, "<tr><td colspan='4' class='meta'>…and %d more</td></tr>", len(p.Links)-shown)
+				break
+			}
+			shown++
+			target := link.Href
+			if link.Resolved != "" {
+				target = link.Resolved
+			}
+			fmt.Fprintf(&b, "<tr><td><code>%s</code></td><td>%s</td><td class='meta'>%s</td><td class='meta'>%s</td></tr>",
+				esc(link.Disposition), esc(target), esc(link.Source), esc(link.Reason))
+		}
+		b.WriteString("</tbody></table>")
+	}
+
 	b.WriteString("<h2>Coverage limits</h2><div class='limits'>")
 	b.WriteString("<p class='meta'>What this run did not test:</p><ul>")
 	if len(p.Summary.NotTested) == 0 {
@@ -313,6 +384,18 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	b.WriteString("</ul></div>")
 	fmt.Fprintf(&b, "<script>%s</script></main></body></html>", filterJS)
 	return b.String()
+}
+
+func detailFloat(detail map[string]any, key string) float64 {
+	switch v := detail[key].(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	}
+	return 0
 }
 
 func percentile(sorted []int64, p int) int64 {

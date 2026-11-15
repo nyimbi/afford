@@ -121,6 +121,31 @@ response status and URL, DOM excerpt, screenshot). Only deterministic predicates
 4. **State bleed.** Each probe starts from a fresh page load in a fresh page; sessions are
    cloned per worker, never shared across concurrent mutations.
 
+## Extensions
+
+**Link inventory.** A link is classified once, at capture: followed, excluded by a scope
+glob, off-origin, empty, `javascript:`, mail or tel. Only `followed` enters the frontier;
+the rest is stored with its reason and rendered as *Links not crawled*. Findings
+(`E_OUT_OF_SCOPE`) are emitted for the two classes the operator can actually change.
+
+**Uploads.** A file input receives a real file: an operator fixture from `[uploads]`
+(by name, then by `accept`), else a synthesized valid PNG/PDF/CSV/JSON/text chosen from
+`accept`. The browser never receives a path the operator did not choose. A missing
+fixture is `E_UPLOAD_FAILED`, not silence.
+
+**Popups.** After an action, extra pages in the context are settled, scanned,
+screenshotted and closed; their observations are attached to the opener's finding with
+`popup_url` and `screenshot`. The collector is bound after the popup exists, so console
+output emitted before it is missed — an accepted limitation of polling the context rather
+than subscribing per probe.
+
+**Visual regression.** Baselines are keyed by route template and viewport, so detail-page
+instances share a reference. Comparison is a pixel diff with a per-channel tolerance,
+because an explainable gate is one people keep. A size change is always a finding.
+Artifacts (baseline, current, diff) are written into the run and shown side by side.
+Volatile regions are masked through Playwright's screenshot mask; baselines are
+platform-specific and must be generated in the environment that compares them.
+
 ## Report
 
 One HTML file plus a `screenshots/` directory, backed by `report.json` and `junit.xml`.
@@ -156,5 +181,6 @@ wall clock; `--no-prompt` turns missing credentials into a failure instead of a 
 
 - v0.2 — route-manifest adapters (Next.js/React Router/Nuxt), OpenAPI-driven valid payloads,
   multi-role crawl (same run as admin/anon/user, diff the affordance sets).
-- v0.3 — run-to-run diff (new/fixed findings), axe-core a11y pass, trace zip per failure.
-- v0.4 — click-path replay for pages that cannot be deep-linked, so they can be probed too.
+- v0.3 — run-to-run diff of findings (new/fixed, not just visual), axe-core a11y pass,
+  trace zip per failure.
+- v0.4 — click-path replay for pages that cannot be deep-linked; interaction inside popups.

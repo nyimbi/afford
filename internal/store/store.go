@@ -12,10 +12,11 @@ import (
 )
 
 type event struct {
-	Kind    string         `json:"kind"`
-	Page    *model.Page    `json:"page,omitempty"`
-	Finding *model.Finding `json:"finding,omitempty"`
-	Probe   string         `json:"probe,omitempty"` // page URL
+	Kind    string            `json:"kind"`
+	Page    *model.Page       `json:"page,omitempty"`
+	Finding *model.Finding    `json:"finding,omitempty"`
+	Link    *model.LinkRecord `json:"link,omitempty"`
+	Probe   string            `json:"probe,omitempty"` // page URL
 }
 
 type Store struct {
@@ -24,6 +25,7 @@ type Store struct {
 	f        *os.File
 	Pages    []model.Page
 	Findings []model.Finding
+	Links    []model.LinkRecord
 	probes   map[string]int
 	index    map[string]int
 }
@@ -68,6 +70,10 @@ func (s *Store) replay() error {
 		case "finding":
 			if e.Finding != nil {
 				s.merge(*e.Finding)
+			}
+		case "link":
+			if e.Link != nil {
+				s.Links = append(s.Links, *e.Link)
 			}
 		case "probe":
 			s.probes[e.Probe]++
@@ -130,6 +136,21 @@ func (s *Store) merge(f model.Finding) {
 	}
 	s.index[k] = len(s.Findings)
 	s.Findings = append(s.Findings, f)
+}
+
+func (s *Store) AddLink(link model.LinkRecord) {
+	s.mu.Lock()
+	s.Links = append(s.Links, link)
+	s.mu.Unlock()
+	s.write(event{Kind: "link", Link: &link})
+}
+
+func (s *Store) LinkRecords() []model.LinkRecord {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]model.LinkRecord, len(s.Links))
+	copy(out, s.Links)
+	return out
 }
 
 func (s *Store) Snapshot() ([]model.Page, []model.Finding) {

@@ -10,6 +10,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,6 +29,7 @@ import (
 	"afford/internal/payloads"
 	"afford/internal/probe"
 	"afford/internal/store"
+	"afford/internal/visual"
 )
 
 type Item struct {
@@ -214,6 +216,7 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
 		r.mu.Unlock()
 	}
 
+	r.auditLinks(scanResult.Controls, final)
 	visible := make([]model.Element, 0, len(scanResult.Controls))
 	for _, c := range scanResult.Controls {
 		if c.Visible {
@@ -229,6 +232,7 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
 	r.mu.Lock()
 	r.stats.pagesVisited++
 	r.mu.Unlock()
+	r.compareVisual(url, discover.Template(url), screenshotRel)
 
 	textSample, _ := page.Evaluate("() => (document.body ? document.body.innerText : '').slice(0, 1500)")
 	sample, _ := textSample.(string)
@@ -302,7 +306,11 @@ func (r *Runner) shoot(page playwright.Page, url string) (string, error) {
 	sum := sha1.Sum([]byte(url))
 	relative := "screenshots/" + hex.EncodeToString(sum[:])[:12] + ".png"
 	path := filepath.Join(r.baseDir, relative)
-	if _, err := browser.Screenshot(page, path); err != nil {
+	masks := []string(nil)
+	if r.cfg.Visual.Enabled {
+		masks = r.cfg.Visual.Mask
+	}
+	if _, err := browser.Screenshot(page, path, masks); err != nil {
 		return "", err
 	}
 	return relative, nil
@@ -323,6 +331,40 @@ func (r *Runner) emit(pageURL, kind string, obs model.Observation, contextKind s
 			f.Evidence = fallbackEvidence(obs)
 		}
 		r.store.AddFinding(f)
+	}
+}
+
+// auditLinks records every link the crawler will not follow, with the reason.
+// The findings are emitted once per (href, disposition) and merged across pages
+// by the store; the inventory keeps the per-page provenance.
+func (r *Runner) auditLinks(controls []model.Element, base string) {
+	seen := map[string]bool{}
+	for _, el := range controls {
+		if el.Tag != "a" || !el.Visible {
+			continue
+		}
+		resolved, disposition, reason := discover.LinkDisposition(base, el.Href, r.cfg)
+		if disposition == "followed" {
+			continue
+		}
+		key := strings.TrimSpace(el.Href) + "|" + disposition
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		r.store.AddLink(model.LinkRecord{
+			Source: base, Href: el.Href, Resolved: resolved,
+			Disposition: disposition, Reason: reason,
+		})
+		if disposition == "excluded" || disposition == "off_origin" {
+			f := model.NewFinding("E_OUT_OF_SCOPE", base)
+			f.Element = fmt.Sprintf("a “%s”", el.Name)
+			f.Detail["href"] = el.Href
+			f.Detail["resolved"] = resolved
+			f.Detail["disposition"] = disposition
+			f.Detail["reason"] = reason
+			r.store.AddFinding(f)
+		}
 	}
 }
 
@@ -355,14 +397,6 @@ func (r *Runner) probeControls(
 		if el.IsSubmit() {
 			continue
 		}
-		if el.Type == "file" {
-			f := model.NewFinding("E_UNSUPPORTED_INPUT", url)
-			f.Element = fmt.Sprintf("input “%s”", el.Name)
-			f.Detail["type"] = "file"
-			r.store.AddFinding(f)
-			r.bump(r.notTested, "file input needs a fixture", 1)
-			continue
-		}
 		if el.Src == "input" && payloads.IsTextLike(el) {
 			continue
 		}
@@ -371,10 +405,6 @@ func (r *Runner) probeControls(
 		}
 		if el.Tag == "a" {
 			if target := discover.Absolute(url, el.Href); target != "" && !discover.InScope(target, r.cfg) {
-				f := model.NewFinding("E_OUT_OF_SCOPE", url)
-				f.Element = fmt.Sprintf("a “%s”", el.Name)
-				f.Detail["href"] = el.Href
-				r.store.AddFinding(f)
 				r.bump(r.skipped, "off-scope link", 1)
 				continue
 			}
@@ -393,7 +423,7 @@ func (r *Runner) probeControls(
 		r.mu.Lock()
 		r.stats.controlsProbed++
 		r.mu.Unlock()
-		obs := probe.ProbeControl(bctx, page, collector, r.cfg, url, el)
+		obs := probe.ProbeControl(bctx, page, collector, r.cfg, url, el, filepath.Join(r.baseDir, "popups"))
 		pointedTo := el
 		r.emit(url, "control", obs, "action", &pointedTo)
 		if obs.Popups > 0 {
@@ -402,12 +432,115 @@ func (r *Runner) probeControls(
 			f.Detail["popups"] = obs.Extra["popups"]
 			r.store.AddFinding(f)
 		}
+		r.popupFindings(url, obs)
 		if obs.Navigated && obs.URLAfter != "" {
 			landed := discover.Normalize(obs.URLAfter)
 			target := discover.Absolute(url, el.Href)
 			if discover.InScope(landed, r.cfg) && (target == "" || landed != discover.Normalize(target)) {
 				*discovered = append(*discovered, found{URL: landed, Depth: depth + 1})
 			}
+		}
+	}
+}
+
+// compareVisual runs the baseline comparison for one page and records what it
+// decided. Artifacts are written under the run directory so the report can show
+// the three images side by side.
+func (r *Runner) compareVisual(rawURL, template, shotRel string) {
+	if !r.cfg.Visual.Enabled || shotRel == "" || r.visualIgnored(rawURL) {
+		return
+	}
+	current, err := os.ReadFile(filepath.Join(r.baseDir, shotRel))
+	if err != nil {
+		r.bump(r.notTested, "visual: screenshot unreadable", 1)
+		return
+	}
+	key := visual.Key(template, r.cfg.Run.Viewport)
+	outcome := visual.Consider(
+		visual.Store{Dir: r.cfg.Visual.Dir},
+		r.cfg.Visual, key, current, filepath.Join(r.baseDir, "visual"),
+	)
+	switch outcome.Action {
+	case "seeded", "updated":
+		f := model.NewFinding("E_VISUAL_BASELINE_WRITTEN", rawURL)
+		f.Detail["action"] = outcome.Action
+		f.Detail["key"] = outcome.Key
+		f.Detail["baseline"] = relPath(r.baseDir, outcome.Baseline)
+		r.store.AddFinding(f)
+	case "diff":
+		f := model.NewFinding("E_VISUAL_DIFF", rawURL)
+		f.Detail["key"] = outcome.Key
+		f.Detail["pct"] = outcome.Pct
+		f.Detail["changed_pixels"] = outcome.Changed
+		f.Detail["total_pixels"] = outcome.Total
+		f.Detail["size_changed"] = outcome.SizeChanged
+		f.Detail["baseline"] = relPath(r.baseDir, outcome.Baseline)
+		f.Detail["current"] = relPath(r.baseDir, outcome.Current)
+		f.Detail["diff"] = relPath(r.baseDir, outcome.Diff)
+		r.store.AddFinding(f)
+	case "error":
+		r.bump(r.notTested, "visual: compare failed", 1)
+	}
+}
+
+func (r *Runner) visualIgnored(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	for _, pattern := range r.cfg.Visual.Ignore {
+		if discover.MatchPath(pattern, parsed.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func relPath(base, path string) string {
+	if path == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return path
+	}
+	return filepath.ToSlash(rel)
+}
+
+// popupFindings attributes what a popup renders to the control that opened it.
+func (r *Runner) popupFindings(opener string, obs model.Observation) {
+	for _, popup := range obs.PopupResults {
+		if !discover.InScope(popup.URL, r.cfg) {
+			f := model.NewFinding("E_OUT_OF_SCOPE", opener)
+			f.Element = "popup"
+			f.Detail["popup_url"] = popup.URL
+			f.Detail["reason"] = "popup opened off-origin"
+			r.store.AddFinding(f)
+			continue
+		}
+		capture := popup.Observation
+		status := capture.Status
+		capture.Status = 0 // the popup's own dead-link finding carries the status
+		for _, f := range oracles.Evaluate(capture, opener, "capture", nil) {
+			if f.Detail == nil {
+				f.Detail = map[string]any{}
+			}
+			f.Detail["popup_url"] = popup.URL
+			if popup.Screenshot != "" {
+				f.Detail["screenshot"] = popup.Screenshot
+			}
+			f.Evidence = append(f.Evidence, "popup opened: "+popup.URL)
+			r.store.AddFinding(f)
+		}
+		if status >= 400 {
+			f := model.NewFinding("E_DEAD_LINK", opener)
+			f.Element = "popup"
+			f.Detail["popup_url"] = popup.URL
+			f.Detail["status"] = popup.Status
+			if popup.Screenshot != "" {
+				f.Detail["screenshot"] = popup.Screenshot
+			}
+			r.store.AddFinding(f)
 		}
 	}
 }

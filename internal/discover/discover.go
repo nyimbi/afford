@@ -337,3 +337,73 @@ func SortedKeys(m map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
+
+// MatchPath exposes the scope glob so callers can reuse the same rule for
+// unrelated path lists such as visual baselines to ignore.
+func MatchPath(pattern, path string) bool {
+	return globMatch(pattern, path)
+}
+
+// LinkDisposition says what the crawler will do with a link, and why. Only
+// "followed" links enter the frontier; everything else is recorded so the
+// report can show what was excluded rather than leave it implicit.
+func LinkDisposition(base, href string, cfg config.Config) (resolved, disposition, reason string) {
+	trimmed := strings.TrimSpace(href)
+	lower := strings.ToLower(trimmed)
+	switch {
+	case trimmed == "" || trimmed == "#":
+		return "", "empty", "no destination"
+	case strings.HasPrefix(lower, "javascript:"):
+		return "", "javascript", "javascript: pseudo-link"
+	case strings.HasPrefix(lower, "mailto:"):
+		return trimmed, "mail", "email address, not a page"
+	case strings.HasPrefix(lower, "tel:"):
+		return trimmed, "tel", "phone number, not a page"
+	}
+	resolved = Absolute(base, href)
+	if resolved == "" {
+		return "", "invalid", "could not resolve against the page URL"
+	}
+	target, err := parseURL(resolved)
+	if err != nil {
+		return "", "invalid", "unparseable URL"
+	}
+	root, err := parseURL(cfg.Run.BaseURL)
+	if err != nil {
+		return resolved, "invalid", "unparseable base URL"
+	}
+	if !strings.EqualFold(target.Host, root.Host) {
+		for _, host := range cfg.Scope.AllowHosts {
+			if strings.EqualFold(host, target.Host) {
+				if InScope(resolved, cfg) {
+					return resolved, "followed", ""
+				}
+				break
+			}
+		}
+		return resolved, "off_origin", "host " + target.Host + " is not the configured origin"
+	}
+	if target.Scheme != root.Scheme {
+		return resolved, "off_origin", "different scheme (" + target.Scheme + ")"
+	}
+	path := target.Path
+	if path == "" {
+		path = "/"
+	}
+	for _, pattern := range cfg.Scope.Exclude {
+		if globMatch(pattern, path) {
+			return resolved, "excluded", "matches exclude " + pattern
+		}
+	}
+	included := false
+	for _, pattern := range cfg.Scope.Include {
+		if globMatch(pattern, path) {
+			included = true
+			break
+		}
+	}
+	if !included {
+		return resolved, "excluded", "outside include patterns"
+	}
+	return resolved, "followed", ""
+}

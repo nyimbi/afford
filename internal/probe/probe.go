@@ -3,7 +3,10 @@
 package probe
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"afford/internal/discover"
 	"afford/internal/model"
 	"afford/internal/payloads"
+	"afford/internal/uploads"
 )
 
 type Load struct {
@@ -184,6 +188,7 @@ func ProbeControl(
 	cfg config.Config,
 	url string,
 	el model.Element,
+	popupShotDir string,
 ) model.Observation {
 	collector.Reset()
 	load := Reset(page, cfg, url)
@@ -201,6 +206,7 @@ func ProbeControl(
 	started := time.Now()
 	occluded := false
 	actionError := ""
+	obsUploadError := ""
 
 	locator, _, ok := Locate(page, el)
 	if !ok {
@@ -209,6 +215,17 @@ func ProbeControl(
 		occluded = IsOccluded(locator)
 		kind := payloads.InferKind(el)
 		switch {
+		case el.Type == "file":
+			file, ferr := uploads.Resolve(el, cfg.Uploads)
+			if ferr != nil {
+				obsUploadError = ferr.Error()
+				break
+			}
+			if err := locator.SetInputFiles([]playwright.InputFile{{
+				Name: file.Name, MimeType: file.MimeType, Buffer: file.Buffer,
+			}}); err != nil {
+				obsUploadError = err.Error()
+			}
 		case el.Tag == "select":
 			if value := payloads.ValidValue(el); value != "" {
 				_, err := locator.SelectOption(playwright.SelectOptionValues{Values: &[]string{value}},
@@ -246,16 +263,16 @@ func ProbeControl(
 	afterSig := Signature(page)
 	full := collector.SnapshotCopy()
 	snapshot := since(baseline, full)
-	popups := 0
-	var popupURLs []string
+	extras := make([]playwright.Page, 0, 2)
+	popupURLs := make([]string, 0, 2)
 	for _, other := range bctx.Pages() {
 		if other == page {
 			continue
 		}
-		popups++
+		extras = append(extras, other)
 		popupURLs = append(popupURLs, other.URL())
-		_ = other.Close()
 	}
+	popups := len(extras)
 	obs := model.Observation{
 		URLBefore:       url,
 		URLAfter:        page.URL(),
@@ -272,6 +289,15 @@ func ProbeControl(
 		Popups:          popups,
 		DurationMS:      int(time.Since(started).Milliseconds()),
 		Extra:           map[string]any{"popups": popupURLs},
+	}
+	if obsUploadError != "" {
+		obs.Extra["upload_error"] = obsUploadError
+	}
+	if cfg.Popups.Mode == "capture" && len(extras) > 0 {
+		obs.PopupResults = capturePopups(extras, cfg, popupShotDir)
+	}
+	for _, extra := range extras {
+		_ = extra.Close()
 	}
 	// A link's destination can be a soft 404: HTTP 200 with "page not found"
 	// text. Sample the main content, not the whole body: site chrome routinely
@@ -304,6 +330,83 @@ func asInt64(v any) int64 {
 		return n
 	}
 	return 0
+}
+
+const popupStatusJS = `() => {
+	const entries = performance.getEntriesByType ? performance.getEntriesByType('navigation') : [];
+	const n = entries && entries[0];
+	return n && n.responseStatus ? n.responseStatus : 0;
+}`
+
+// capturePopups settles and captures each popup before closing it. The event
+// collector is attached after the page exists, so very early console output is
+// missed; everything after load is attributed to the opener's finding.
+func capturePopups(pages []playwright.Page, cfg config.Config, shotDir string) []model.PopupResult {
+	limit := cfg.Popups.Max
+	if limit <= 0 {
+		limit = 5
+	}
+	out := make([]model.PopupResult, 0, len(pages))
+	for i, popup := range pages {
+		if i >= limit {
+			break
+		}
+		result := model.PopupResult{URL: popup.URL()}
+		if !discover.InScope(result.URL, cfg) {
+			out = append(out, result)
+			continue
+		}
+		collector := &browser.Collector{}
+		collector.Bind(popup)
+		browser.Settle(popup, cfg)
+		result.URL = popup.URL()
+		scanResult, err := discover.Scan(popup)
+		if err == nil {
+			result.Title = scanResult.Title
+			if raw, evalErr := popup.Evaluate(popupStatusJS); evalErr == nil {
+				result.Status = int(asInt64(raw))
+			}
+			snapshot := collector.SnapshotCopy()
+			visible := 0
+			for _, el := range scanResult.Controls {
+				if el.Visible {
+					visible++
+				}
+			}
+			result.Observation = model.Observation{
+				URLBefore:       result.URL,
+				URLAfter:        popup.URL(),
+				Title:           scanResult.Title,
+				Status:          result.Status,
+				BodyLen:         scanResult.BodyLen,
+				Requests:        snapshot.Requests,
+				ConsoleErrors:   snapshot.ConsoleErrors,
+				ConsoleWarnings: snapshot.ConsoleWarnings,
+				PageErrors:      snapshot.PageErrors,
+				Dialogs:         snapshot.Dialogs,
+				Extra: map[string]any{
+					"overflow_x":        scanResult.OverflowX,
+					"scroll_width":      scanResult.ScrollWidth,
+					"viewport_width":    scanResult.ViewportWidth,
+					"interactive_count": visible,
+					"text_sample":       "",
+				},
+			}
+			if shotDir != "" {
+				name := fmt.Sprintf("popup-%s.png", shortHash(result.URL))
+				if path, shotErr := browser.Screenshot(popup, filepath.Join(shotDir, name), nil); shotErr == nil {
+					result.Screenshot = path
+				}
+			}
+		}
+		out = append(out, result)
+	}
+	return out
+}
+
+func shortHash(value string) string {
+	sum := sha1.Sum([]byte(value))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // since returns the events that appeared after the baseline was taken.
@@ -506,6 +609,16 @@ func ProbeForm(
 				if err := locator.Fill("", playwright.LocatorFillOptions{
 					Timeout: playwright.Float(float64(cfg.Limits.ProbeTimeoutMS)),
 				}); err == nil {
+					meta.Filled++
+				}
+			}
+			continue
+		}
+		if el.Type == "file" {
+			if file, ferr := uploads.Resolve(el, cfg.Uploads); ferr == nil {
+				if err := locator.SetInputFiles([]playwright.InputFile{{
+					Name: file.Name, MimeType: file.MimeType, Buffer: file.Buffer,
+				}}); err == nil {
 					meta.Filled++
 				}
 			}

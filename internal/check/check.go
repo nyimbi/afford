@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ import (
 	"afford/internal/oracles"
 	"afford/internal/payloads"
 	"afford/internal/probe"
+	"afford/internal/visual"
 )
 
 type Options struct {
@@ -228,6 +230,34 @@ func (c *Checker) Check(ctx context.Context, rawURL string, opts Options) (Resul
 			add(f)
 		}
 		result.Screenshot = shot
+		if c.cfg.Visual.Enabled && shot != "" && !c.visualIgnored(rawURL) {
+			if current, readErr := os.ReadFile(shot); readErr == nil {
+				outcome := visual.Consider(
+					visual.Store{Dir: c.cfg.Visual.Dir},
+					c.cfg.Visual, visual.Key(discover.Template(rawURL), c.cfg.Run.Viewport),
+					current, filepath.Join(c.cfg.Run.Out, "mcp", "visual"),
+				)
+				switch outcome.Action {
+				case "seeded", "updated":
+					f := model.NewFinding("E_VISUAL_BASELINE_WRITTEN", rawURL)
+					f.Detail["action"] = outcome.Action
+					f.Detail["key"] = outcome.Key
+					f.Detail["baseline"] = outcome.Baseline
+					add(f)
+				case "diff":
+					f := model.NewFinding("E_VISUAL_DIFF", rawURL)
+					f.Detail["key"] = outcome.Key
+					f.Detail["pct"] = outcome.Pct
+					f.Detail["changed_pixels"] = outcome.Changed
+					f.Detail["total_pixels"] = outcome.Total
+					f.Detail["size_changed"] = outcome.SizeChanged
+					f.Detail["baseline"] = outcome.Baseline
+					f.Detail["current"] = outcome.Current
+					f.Detail["diff"] = outcome.Diff
+					add(f)
+				}
+			}
+		}
 	}
 	if opts.ReadOnly || result.AuthRedirect {
 		result.Notes = append(result.Notes, readOnlyNote(opts, result.AuthRedirect))
@@ -261,7 +291,11 @@ func (c *Checker) shoot(page playwright.Page, rawURL string) (string, error) {
 	if err != nil {
 		full = path
 	}
-	if _, err := browser.Screenshot(page, full); err != nil {
+	masks := []string(nil)
+	if c.cfg.Visual.Enabled {
+		masks = c.cfg.Visual.Mask
+	}
+	if _, err := browser.Screenshot(page, full, masks); err != nil {
 		return "", err
 	}
 	return full, nil
@@ -288,13 +322,6 @@ func (c *Checker) probeControls(
 		if !el.Visible || el.Disabled || el.IsSubmit() {
 			continue
 		}
-		if el.Type == "file" {
-			f := model.NewFinding("E_UNSUPPORTED_INPUT", rawURL)
-			f.Element = fmt.Sprintf("input “%s”", el.Name)
-			f.Detail["type"] = "file"
-			add(f)
-			continue
-		}
 		if el.Src == "input" && payloads.IsTextLike(el) {
 			continue
 		}
@@ -313,7 +340,8 @@ func (c *Checker) probeControls(
 			continue
 		}
 		probed++
-		obs := probe.ProbeControl(bctx, page, collector, cfg, rawURL, el)
+		obs := probe.ProbeControl(bctx, page, collector, cfg, rawURL, el,
+			filepath.Join(cfg.Run.Out, "mcp", "popups"))
 		pointedTo := el
 		add(oracles.Evaluate(obs, rawURL, "action", &pointedTo)...)
 		if obs.Popups > 0 {
@@ -322,6 +350,7 @@ func (c *Checker) probeControls(
 			f.Detail["popups"] = obs.Extra["popups"]
 			add(f)
 		}
+		add(c.popupFindings(rawURL, obs)...)
 	}
 	result.ControlsProbed = probed
 	for kind, n := range destructive {
@@ -332,6 +361,55 @@ func (c *Checker) probeControls(
 	if offScope > 0 {
 		result.Notes = append(result.Notes, fmt.Sprintf("skipped %d link(s) outside the crawl scope", offScope))
 	}
+}
+
+func (c *Checker) visualIgnored(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	for _, pattern := range c.cfg.Visual.Ignore {
+		if discover.MatchPath(pattern, parsed.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Checker) popupFindings(opener string, obs model.Observation) []model.Finding {
+	var out []model.Finding
+	for _, popup := range obs.PopupResults {
+		if !discover.InScope(popup.URL, c.cfg) {
+			f := model.NewFinding("E_OUT_OF_SCOPE", opener)
+			f.Element = "popup"
+			f.Detail["popup_url"] = popup.URL
+			f.Detail["reason"] = "popup opened off-origin"
+			out = append(out, f)
+			continue
+		}
+		capture := popup.Observation
+		status := capture.Status
+		capture.Status = 0 // the popup's own dead-link finding carries the status
+		for _, f := range oracles.Evaluate(capture, opener, "capture", nil) {
+			if f.Detail == nil {
+				f.Detail = map[string]any{}
+			}
+			f.Detail["popup_url"] = popup.URL
+			if popup.Screenshot != "" {
+				f.Detail["screenshot"] = popup.Screenshot
+			}
+			f.Evidence = append(f.Evidence, "popup opened: "+popup.URL)
+			out = append(out, f)
+		}
+		if status >= 400 {
+			f := model.NewFinding("E_DEAD_LINK", opener)
+			f.Element = "popup"
+			f.Detail["popup_url"] = popup.URL
+			f.Detail["status"] = popup.Status
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func (c *Checker) sweep(

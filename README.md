@@ -33,9 +33,19 @@ values.
 Dropdowns are audited: an option whose visible label is a UUID or ULID is reported,
 as are UUID option values and a select with nothing to choose. Links are checked by
 clicking them, so both 4xx/5xx targets and SPA "soft 404s" — HTTP 200 with "page not
-found" text — are caught. Every page gets a full-page screenshot and two timings:
+found" text — are caught, and every link the crawler refuses is listed with its reason
+in **Links not crawled**.
+
+File inputs are exercised with a real file: a fixture from `[uploads]`, or a small valid
+file synthesized to match the input's `accept` attribute. Change handlers, client
+validation and the submit path all run. Pages opened in a new tab are captured too —
+status, console errors, overflow, screenshot — and attributed to the control that opened
+them. Every page gets a full-page screenshot and two timings:
 the browser load event, and the settled time when afford's quiet-network and
 quiet-DOM criteria are met.
+
+With `--visual`, each page's screenshot is compared against a baseline keyed by route
+template and viewport. See [Visual regression](#visual-regression).
 
 `report.html` opens with a filterable page table — thumbnail, status, load, settled,
 controls, probes, findings — followed by the findings with their evidence. `afford
@@ -57,6 +67,34 @@ Credentials come from a TTY prompt, from `AFFORD_USERNAME` / `AFFORD_PASSWORD`, 
 from a saved `--storage-state` file. They never enter argv, the report, or the run
 log. If every navigation lands back on a login path, the run emits `E_AUTH_WALL`
 at blocker severity rather than reporting a clean one-page crawl.
+
+## Visual regression
+
+```sh
+afford run --visual              # compare against .afford/baselines
+afford run --update-baseline     # accept the current rendering as the reference
+```
+
+The first `--visual` run seeds a baseline per route template and viewport and reports
+`E_VISUAL_BASELINE_WRITTEN`. Later runs report `E_VISUAL_DIFF` with the percentage of
+changed pixels, a bounding box, and baseline/current/diff images side by side in the
+report. Tuning:
+
+```toml
+[visual]
+enabled = false
+threshold_pct = 0.1        # percent of pixels that may differ before it is a finding
+tolerance = 12             # per-channel difference treated as identical
+max_diff_pixels = 0        # absolute floor, 0 disables
+mask = [".timestamp", ".live-indicator"]   # hidden from the screenshot
+ignore = ["/admin/**"]
+dir = ".afford/baselines"
+```
+
+A baseline is an artefact of one browser on one platform. Font rendering and
+antialiasing differ across machines, so generate and compare baselines in the same
+image — a container in CI is the usual answer. Mask anything that legitimately changes
+between runs; a visual gate that cries wolf gets switched off.
 
 ## MCP — let an agent check one page
 
@@ -116,8 +154,8 @@ complete GitHub Actions job.
 `afford init` writes a starter `afford.toml`; every key is documented in
 `cmd/afford/main.go` usage and `internal/config/config.go`. The interesting knobs
 are `[run] depth` (`smoke` — one payload per input; `standard` — boundaries and
-unicode; `deep` — injection sentinels), `[limits] concurrency`, and
-`[safety] allow_destructive`.
+unicode; `deep` — injection sentinels), `[limits] concurrency`, `[uploads]` for file
+fixtures, `[popups] mode` (`capture` or `off`), `[visual]`, and the `[safety]` grants.
 
 ## Development
 

@@ -10,12 +10,44 @@ import (
 )
 
 type Config struct {
-	Run    RunConfig    `toml:"run"`
-	Scope  ScopeConfig  `toml:"scope"`
-	Auth   AuthConfig   `toml:"auth"`
-	Safety SafetyConfig `toml:"safety"`
-	Limits LimitsConfig `toml:"limits"`
-	MCP    MCPConfig    `toml:"mcp"`
+	Run     RunConfig     `toml:"run"`
+	Scope   ScopeConfig   `toml:"scope"`
+	Auth    AuthConfig    `toml:"auth"`
+	Safety  SafetyConfig  `toml:"safety"`
+	Limits  LimitsConfig  `toml:"limits"`
+	MCP     MCPConfig     `toml:"mcp"`
+	Uploads UploadsConfig `toml:"uploads"`
+	Popups  PopupsConfig  `toml:"popups"`
+	Visual  VisualConfig  `toml:"visual"`
+}
+
+// VisualConfig governs screenshot comparison. Off by default: a visual gate is
+// only meaningful once you have decided what a baseline is and where it lives.
+type VisualConfig struct {
+	Enabled        bool     `toml:"enabled"`
+	UpdateBaseline bool     `toml:"update_baseline"`
+	ThresholdPct   float64  `toml:"threshold_pct"`
+	Tolerance      int      `toml:"tolerance"`
+	MaxDiffPixels  int      `toml:"max_diff_pixels"`
+	Mask           []string `toml:"mask"`
+	Ignore         []string `toml:"ignore"`
+	Dir            string   `toml:"dir"`
+}
+
+// PopupsConfig controls what happens to pages a control opens in a new tab.
+type PopupsConfig struct {
+	Mode string `toml:"mode"` // capture | off
+	Max  int    `toml:"max"`
+}
+
+// UploadsConfig maps a file input to a fixture. Every rule is a local path or
+// a name inside Dir; the browser never receives a path the operator did not
+// choose, and a missing fixture degrades to a synthesized file.
+type UploadsConfig struct {
+	Dir      string            `toml:"dir"`
+	Default  string            `toml:"default"`
+	ByName   map[string]string `toml:"by_name"`
+	ByAccept map[string]string `toml:"by_accept"`
 }
 
 // MCPConfig governs the agent-facing server. An agent can name any URL, so the
@@ -121,7 +153,10 @@ func Default() Config {
 			NavigationTimeoutMS: 15000, ProbeTimeoutMS: 8000,
 			SettleMS: 1200, QuietMS: 350,
 		},
-		MCP: MCPConfig{CallTimeoutSecs: 120, MaxControls: 40},
+		MCP:     MCPConfig{CallTimeoutSecs: 120, MaxControls: 40},
+		Uploads: UploadsConfig{},
+		Popups:  PopupsConfig{Mode: "capture", Max: 5},
+		Visual:  VisualConfig{ThresholdPct: 0.1, Tolerance: 12, Dir: ".afford/baselines"},
 	}
 }
 
@@ -146,6 +181,11 @@ func (c *Config) Validate() error {
 	default:
 		problems = append(problems, "run.depth must be smoke, standard or deep")
 	}
+	switch c.Popups.Mode {
+	case "capture", "off":
+	default:
+		problems = append(problems, "popups.mode must be capture or off")
+	}
 	switch c.Auth.Mode {
 	case "none", "form", "basic", "bearer", "storage":
 	default:
@@ -165,6 +205,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MCP.CallTimeoutSecs < 0 {
 		problems = append(problems, "mcp.call_timeout_secs must be >= 0")
+	}
+	if c.Visual.ThresholdPct < 0 {
+		problems = append(problems, "visual.threshold_pct must be >= 0")
 	}
 	if c.MCP.MaxControls < 1 {
 		problems = append(problems, "mcp.max_controls must be at least 1")
@@ -201,6 +244,27 @@ allow_delete = false      # click controls that delete or erase data
 allow_side_effects = false # click pay/send/publish/logout/approve controls
 allow_destructive = false  # umbrella: sets both grants above
 extra_destructive = []
+
+[visual]
+enabled = false           # compare screenshots against .afford/baselines
+threshold_pct = 0.1       # percent of pixels that may differ
+tolerance = 12            # per-channel difference treated as identical
+# max_diff_pixels = 100
+# mask = [".timestamp", ".live-indicator"]
+# ignore = ["/admin/**"]
+# dir = ".afford/baselines"
+
+[popups]
+mode = "capture"          # capture | off
+max = 5
+
+[uploads]
+# dir = "fixtures/uploads"
+# default = "sample.pdf"
+# [uploads.by_name]
+# avatar = "avatar.png"
+# [uploads.by_accept]
+# "application/pdf" = "sample.pdf"
 
 [mcp]
 # The agent-facing server refuses URLs outside the configured origin unless

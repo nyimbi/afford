@@ -26,6 +26,7 @@ NAV = """
   <a href="/soft-404">soft 404</a>
   <a href="/old-route">old route</a>
   <a href="/dropdown">dropdown</a>
+  <a href="/upload">upload</a>
   <a href="/form-ok">valid form</a>
 </nav>
 """
@@ -75,6 +76,7 @@ def index() -> str:
 	<p><button id="refresh">Refresh</button> — this button has no handler.</p>
 	<p><a href="#">A link that goes nowhere</a></p>
 	<p><a href="/dead" target="_blank">Open the dead page in a new tab</a></p>
+	<p><a href="/overflow" target="_blank">Open overflow in a new tab</a></p>
 	<ul>
 	  <li>dashboard needs a session</li>
 	  <li>crash throws on load</li>
@@ -258,6 +260,21 @@ def dropdown() -> str:
 	</form>
 	"""
 	return page("Dropdowns", body)
+
+
+@app.get("/upload", response_class=HTMLResponse)
+def upload() -> str:
+	# Planted defect: the change handler throws, which proves afford attached a
+	# real file. It also means the upload path is not silent.
+	body = """
+	<h1>Upload</h1>
+	<p>Choose a file. The handler throws on purpose.</p>
+	<label for="attachment">Attachment</label>
+	<input id="attachment" name="attachment" type="file"
+	       accept="image/*,.pdf"
+	       onchange="throw new Error('canary upload handler')">
+	"""
+	return page("Upload", body)
 
 
 @app.get("/form-ok", response_class=HTMLResponse)

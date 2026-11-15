@@ -91,6 +91,8 @@ Run options:
   --no-prompt            fail instead of asking for credentials
   --headful              show the browser
   --embed-images         inline screenshots in the HTML report
+  --visual               compare screenshots against the baseline store
+  --update-baseline      write current screenshots as the new baseline
   --timeout SECONDS      hard wall for the whole run (0 disables)
   --fail-on LEVEL        blocker | critical | major | minor | info | never
   --quiet                no console summary; artifacts only
@@ -250,6 +252,7 @@ func cmdRun(args []string) int {
 	)
 	var (
 		allowDestructive, allowDelete, allowSideEffects, noSubmit, headful, embedImages, noPrompt bool
+		visualEnabled, updateBaseline                                                             bool
 	)
 
 	fs.StringVar(&baseURL, "base-url", "", "target application")
@@ -271,6 +274,8 @@ func cmdRun(args []string) int {
 	fs.BoolVar(&allowSideEffects, "allow-side-effects", false, "click pay/send/publish/logout/approve controls")
 	fs.BoolVar(&noSubmit, "no-submit", false, "never submit a form")
 	fs.BoolVar(&headful, "headful", false, "show the browser")
+	fs.BoolVar(&visualEnabled, "visual", false, "compare screenshots against the baseline store")
+	fs.BoolVar(&updateBaseline, "update-baseline", false, "write current screenshots as the new baseline")
 	fs.BoolVar(&embedImages, "embed-images", false, "inline screenshots")
 	fs.BoolVar(&noPrompt, "no-prompt", false, "never prompt for credentials")
 	fs.IntVar(&timeoutSecs, "timeout", -1, "hard wall in seconds")
@@ -330,6 +335,12 @@ func cmdRun(args []string) int {
 	}
 	if embedImages {
 		cfg.Run.EmbedImages = true
+	}
+	if visualEnabled || updateBaseline {
+		cfg.Visual.Enabled = true
+	}
+	if updateBaseline {
+		cfg.Visual.UpdateBaseline = true
 	}
 	if timeoutSecs >= 0 {
 		cfg.Run.TimeoutSecs = timeoutSecs

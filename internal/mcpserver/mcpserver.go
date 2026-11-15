@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -125,12 +126,13 @@ type crawlIn struct {
 }
 
 type crawlOut struct {
-	RunID    string          `json:"run_id"`
-	Report   string          `json:"report"`
-	Summary  model.Summary   `json:"summary"`
-	Findings []model.Finding `json:"findings"`
-	Pages    []string        `json:"pages"`
-	OK       bool            `json:"ok"`
+	RunID      string          `json:"run_id"`
+	Report     string          `json:"report"`
+	Summary    model.Summary   `json:"summary"`
+	Findings   []model.Finding `json:"findings"`
+	Pages      []string        `json:"pages"`
+	LinkCounts map[string]int  `json:"link_counts"`
+	OK         bool            `json:"ok"`
 }
 
 func (s *Server) checkPage(ctx context.Context, _ *mcp.CallToolRequest, in checkPageIn) (*mcp.CallToolResult, pageOut, error) {
@@ -228,9 +230,13 @@ func (s *Server) crawlSite(ctx context.Context, _ *mcp.CallToolRequest, in crawl
 	for _, p := range pages {
 		urls = append(urls, p.URL)
 	}
+	linkCounts := map[string]int{}
+	for _, link := range st.LinkRecords() {
+		linkCounts[link.Disposition]++
+	}
 	out := crawlOut{
 		RunID: runID, Report: reportPath, Summary: summary, Findings: findings,
-		Pages: urls, OK: !hasSerious(summary.Counts),
+		Pages: urls, LinkCounts: linkCounts, OK: !hasSerious(summary.Counts),
 	}
 	return textResult(digestCrawl(out)), out, nil
 }
@@ -309,6 +315,14 @@ func digestCrawl(out crawlOut) string {
 		}
 		fmt.Fprintf(&b, "\n- %s %s — %s (%s)",
 			strings.ToUpper(string(f.Severity)), f.Code, f.Title, f.PageURL)
+	}
+	if len(out.LinkCounts) > 0 {
+		parts := make([]string, 0, len(out.LinkCounts))
+		for disposition, n := range out.LinkCounts {
+			parts = append(parts, fmt.Sprintf("%s %d", disposition, n))
+		}
+		sort.Strings(parts)
+		fmt.Fprintf(&b, "\nlinks not crawled: %s", strings.Join(parts, ", "))
 	}
 	fmt.Fprintf(&b, "\nreport %s", out.Report)
 	return b.String()

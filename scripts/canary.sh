@@ -54,19 +54,37 @@ expected = {
     "E_OVERFLOW_X", "E_UNLABELED_CONTROL", "E_HTTP_4XX", "E_500_ON_ACTION",
     "E_500_ON_VALID", "E_VALIDATION_NOT_ENFORCED", "E_DEAD_LINK",
     "E_UUID_EXPOSED", "E_UUID_IN_OPTION_VALUE", "E_EMPTY_SELECT",
-    "E_DESTRUCTIVE_SKIPPED", "E_NEW_TAB", "E_UNSUPPORTED_INPUT",
+    "E_DESTRUCTIVE_SKIPPED", "E_NEW_TAB", "E_CLIENT_ERROR_ON_ACTION",
     "E_NOT_DEEPLINKABLE",
 }
 missing = expected - found
 if missing:
     raise SystemExit(f"canary: missing {sorted(missing)}\nfound {sorted(found)}")
 
+uploaded = any(
+    f["code"] == "E_CLIENT_ERROR_ON_ACTION" and "Attachment" in (f.get("element") or "")
+    for f in payload["findings"]
+)
+if not uploaded:
+    raise SystemExit("canary: the file input was not exercised (no upload handler error)")
+
+popups = [f for f in payload["findings"] if f["detail"].get("popup_url")]
+if not popups:
+    raise SystemExit("canary: no finding was attributed to a popup")
+shot = popups[0]["detail"].get("screenshot", "")
+if shot:
+    import os
+    run_dir = os.path.dirname(reports[-1])
+    path = shot if os.path.isabs(shot) else os.path.join(run_dir, shot)
+    if not os.path.exists(path):
+        raise SystemExit(f"canary: popup screenshot missing: {path}")
+
 kinds = {f["detail"].get("kind") for f in payload["findings"]
          if f["code"] == "E_DESTRUCTIVE_SKIPPED"}
 if not {"delete", "side_effect"} <= kinds:
     raise SystemExit(f"canary: destructive classes not distinguished: {kinds}")
 print(f"canary ok: {len(expected)}/{len(expected)} planted defects found, "
-      f"permission classes {sorted(kinds)}")
+      f"permission classes {sorted(kinds)}, popup findings {len(popups)}")
 PY
 
 # The deletion grant must actually be wired, and must not leak into the

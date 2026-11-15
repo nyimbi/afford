@@ -75,6 +75,12 @@ var specs = []FindingSpec{
 		"Option labels are readable but their values are UUIDs or ULIDs. Often intentional in a form, but it puts internal keys in the DOM, logs and any client-side state."},
 	{"E_EMPTY_SELECT", Minor, "Dropdown has nothing to choose",
 		"A visible, enabled select has no selectable option: every option is a placeholder, disabled, or absent. The user is shown a control that cannot be used. A select that is meant to stay empty until another field changes should be disabled until then."},
+	{"E_VISUAL_DIFF", Major, "Page changed visually against its baseline",
+		"The rendered page differs from the stored baseline beyond the configured tolerance. Either the change was intended (update the baseline) or a layout, style or data regression shipped."},
+	{"E_VISUAL_BASELINE_WRITTEN", Info, "Visual baseline written",
+		"No baseline existed for this page, or it was explicitly refreshed. This run recorded the reference image; the next run compares against it."},
+	{"E_UPLOAD_FAILED", Major, "File upload could not be exercised",
+		"The tool resolved a fixture for the file input but the browser refused to attach it, or a configured fixture was missing. The upload path is untested."},
 	{"E_SCREENSHOT_FAILED", Info, "Screenshot could not be captured",
 		"The page was visited but no image was written, so the visual record for this route is missing. Usually a browser crash or a page that never stabilised."},
 	{"E_DEAD_LINK", Major, "Dead link",
@@ -83,8 +89,6 @@ var specs = []FindingSpec{
 		"href is '#', empty, or javascript:void(0). It looks navigable and is not."},
 	{"E_ALERT", Minor, "Native alert/confirm/prompt used",
 		"Blocking browser dialogs break automation and are hard to style or dismiss deliberately."},
-	{"E_UNSUPPORTED_INPUT", Info, "Input type not exercised",
-		"File uploads and other non-synthetic inputs need a fixture. Recorded so coverage stays honest."},
 	{"E_500_ON_ACTION", Critical, "Action triggered a server error",
 		"Clicking or submitting caused a 5xx that the user would see as a failed operation."},
 	{"E_CLIENT_ERROR_ON_ACTION", Major, "Action triggered an uncaught exception",
@@ -179,7 +183,7 @@ func Specs() []FindingSpec {
 // chrome (a nav link that 404s) is one finding with N locations, not N findings.
 func (f Finding) Key() string {
 	parts := []string{f.Code, f.Element}
-	for _, name := range []string{"url", "status", "error", "requests"} {
+	for _, name := range []string{"url", "status", "error", "requests", "popup_url", "key"} {
 		if v, ok := f.Detail[name]; ok {
 			parts = append(parts, name+"="+fmt.Sprint(v))
 		}
@@ -267,6 +271,24 @@ func (s ScanResult) ByIdx(idx int) (Element, bool) {
 	return Element{}, false
 }
 
+// LinkRecord is a link the crawler saw and did not follow, with the reason.
+type LinkRecord struct {
+	Source      string `json:"source"`
+	Href        string `json:"href"`
+	Resolved    string `json:"resolved,omitempty"`
+	Disposition string `json:"disposition"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// PopupResult is a page opened in a new tab by one control.
+type PopupResult struct {
+	URL         string      `json:"url"`
+	Status      int         `json:"status,omitempty"`
+	Title       string      `json:"title,omitempty"`
+	Screenshot  string      `json:"screenshot,omitempty"`
+	Observation Observation `json:"observation"`
+}
+
 type RequestRecord struct {
 	URL          string `json:"url"`
 	Method       string `json:"method"`
@@ -294,6 +316,7 @@ type Observation struct {
 	Popups          int             `json:"popups,omitempty"`
 	DurationMS      int             `json:"duration_ms"`
 	Extra           map[string]any  `json:"extra,omitempty"`
+	PopupResults    []PopupResult   `json:"popup_results,omitempty"`
 }
 
 // ErrorRequests returns requests that failed or returned 4xx/5xx.

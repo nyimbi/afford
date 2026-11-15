@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/mxschmitt/playwright-go"
@@ -235,15 +236,21 @@ func toInt(v any) int {
 	return 0
 }
 
-func Screenshot(page playwright.Page, path string) (string, error) {
+func Screenshot(page playwright.Page, path string, masks []string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
-	_, err := page.Screenshot(playwright.PageScreenshotOptions{
+	options := playwright.PageScreenshotOptions{
 		Path:       playwright.String(path),
 		FullPage:   playwright.Bool(true),
 		Animations: playwright.ScreenshotAnimationsDisabled,
-	})
+	}
+	for _, selector := range masks {
+		if selector = strings.TrimSpace(selector); selector != "" {
+			options.Mask = append(options.Mask, page.Locator(selector))
+		}
+	}
+	_, err := page.Screenshot(options)
 	if err != nil {
 		return "", err
 	}

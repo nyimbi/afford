@@ -284,6 +284,10 @@ func Evaluate(obs model.Observation, pageURL, kind string, element *model.Elemen
 
 	if kind == "action" && element != nil {
 		switch {
+		case obs.Extra["upload_error"] != nil:
+			f := add("E_UPLOAD_FAILED")
+			f.Detail["error"] = obs.Extra["upload_error"]
+			out = append(out, f)
 		case obs.ActionError != "":
 			f := add("E_CONTROL_ERROR")
 			f.Detail["error"] = obs.ActionError

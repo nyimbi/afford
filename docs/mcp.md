@@ -16,7 +16,7 @@ never from tool arguments (those land in the host's transcript).
 | tool | mutates? | use it for |
 |---|---|---|
 | `inspect_page` | no | status, title, console errors, uncaught exceptions, failed requests, blank/error render, overflow, control inventory, screenshot |
-| `check_page` | clicks and fills; submits only with `submit=true` | the full affordance check on one page |
+| `check_page` | clicks, fills, uploads a fixture file, captures popups; submits only with `submit=true` | the full affordance check on one page |
 | `crawl_site` | same, bounded by `max_pages` | a whole-site sweep with an HTML/JSON/JUnit report |
 
 `check_page` arguments: `url`, `read_only`, `submit`, `depth` (`smoke`/`standard`/`deep`),
@@ -75,6 +75,13 @@ An agent does not get a wider blast radius than a human running the CLI:
 - **No prompts.** A missing credential is an error the agent can report, not a hang.
 - **One browser, serialized probes.** Concurrent probes against one app produce
   unattributable evidence; the checker takes a lock.
+- **Uploads use fixtures the operator chose.** A file input receives a file from
+  `[uploads]` or a synthesized sample matching `accept`; an agent cannot name a host path.
+- **Popups are captured, not driven.** A page opened in a new tab is settled, scanned,
+  screenshotted and closed; its console errors and overflow are attributed to the opener.
+- **Visual comparison follows the server config.** With `[visual] enabled = true`,
+  `check_page` also compares against the shared baseline store and returns
+  `E_VISUAL_DIFF` findings.
 - **Call timeout.** `[mcp] call_timeout_secs` (default 120) bounds each call, and
   `crawl_site` is additionally bounded by page and depth budgets.
 

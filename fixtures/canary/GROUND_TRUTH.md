@@ -19,8 +19,9 @@ AFFORD_USERNAME=admin AFFORD_PASSWORD=secret \
 |---|---|---|
 | `/` | `<button>Refresh</button>` with no handler | `E_DEAD_CONTROL` |
 | `/` | `<a href="#">` | `E_EMPTY_HREF` |
-| `/` | `target="_blank"` link | `E_NEW_TAB` |
-| `/form-ok` | `<input type="file">` | `E_UNSUPPORTED_INPUT` |
+| `/` | `target="_blank"` links | `E_NEW_TAB` |
+| `/` | popup renders `/overflow` | `E_OVERFLOW_X` with `detail.popup_url` and a popup screenshot |
+| `/upload` | file input whose change handler throws | `E_CLIENT_ERROR_ON_ACTION` (proves the file was attached) |
 | `/crash` | async throw after paint | `E_UNCAUGHT` |
 | `/console` | `console.error` on load | `E_CONSOLE_ERROR` |
 | `/overflow` | 1400px block at 1280px viewport | `E_OVERFLOW_X` |

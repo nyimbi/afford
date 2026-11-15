@@ -14,6 +14,9 @@ Go 1.22+, stdlib plus Playwright-Go. No cgo.
 - MCP tool failures return a Go error, not a zero output struct: the SDK validates structured output against the inferred schema even on error results, so a zero struct with nil maps fails the call.
 - Mutation permissions are classed: creation (`submit_forms`), deletion (`allow_delete`), other irreversible effects (`allow_side_effects`), with `allow_destructive` as the umbrella. A skipped control reports the class and the flag that would allow it.
 - The destructive vocabulary matches on word boundaries. Substring matching quarantined a nav link called "dropdown" because it contains "drop".
+- New subsystems: `internal/uploads` (fixture resolution, never a host path), `internal/visual` (baseline store + pixel diff). Popup capture lives in `probe` and is attributed in `run`/`check`.
+- Popup capture polls `context.Pages()` after the action; do not close a popup before it has been settled and scanned.
+- `Finding.Key()` includes `popup_url` and the visual baseline key so popup and visual findings do not merge into the page finding.
 - `make canary` is the gate. It starts `fixtures/canary`, runs the tool, and asserts every planted defect in `fixtures/canary/GROUND_TRUTH.md` was found. If it fails, the tool broke.
 - `make mcp-smoke` speaks JSON-RPC over stdio to the shipped binary: tools/list, check_page, inspect_page, off-origin refusal, crawl_site. A tool that lists but cannot be called is not a tool.
 - gofmt before committing.
