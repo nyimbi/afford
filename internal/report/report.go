@@ -108,6 +108,8 @@ td.bad{color:var(--critical);font-weight:650}
 .trio{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px}
 .trio figure{margin:0}
 .trio img{width:100%;border:1px solid var(--line);border-radius:6px;background:var(--chip)}
+.badge{display:inline-block;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;border-radius:99px;padding:1px 7px;margin-left:6px;background:var(--chip);color:var(--muted);vertical-align:middle}
+.badge.new{background:#b3261e;color:#fff}.badge.unconfirmed{background:#7a5c00;color:#fff}.badge.confirmed{background:#1d6b3a;color:#fff}
 .trio figcaption{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
 @media (max-width:720px){.trio{grid-template-columns:1fr}}
 a.shot img{width:120px;border:1px solid var(--line);border-radius:6px;margin-top:8px;display:block}
@@ -176,6 +178,10 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 			level, p.Summary.Counts[level], level)
 	}
 	b.WriteString("</div>")
+	if line := gateLine(p.Summary); line != "" {
+		fmt.Fprintf(&b, "<div class='meta gate'>%s</div>", esc(line))
+	}
+	b.WriteString(baselineHTML(p.Summary))
 
 	var visualDiffs []model.Finding
 	for _, f := range p.Findings {
@@ -218,9 +224,15 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	}
 	b.WriteString("</div>")
 
-	if len(p.Findings) > 8 {
+	var gating []model.Finding
+	for _, f := range p.Findings {
+		if f.Gates() {
+			gating = append(gating, f)
+		}
+	}
+	if len(gating) > 8 {
 		b.WriteString("<div class='start'><h2>Start here</h2><ol>")
-		for _, f := range p.Findings[:3] {
+		for _, f := range gating[:3] {
 			fmt.Fprintf(&b, "<li><code>%s</code> %s — <a href='%s'>%s</a>",
 				esc(f.Code), esc(f.Title), esc(f.PageURL), esc(f.PageURL))
 			if first := firstEvidence(f); first != "" {
@@ -244,10 +256,10 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 		b.WriteString("<tr><td colspan='5'>no findings</td></tr>")
 	}
 	for _, f := range p.Findings {
-		search := strings.ToLower(f.Code + " " + f.Title + " " + f.PageURL + " " + f.Element)
+		search := strings.ToLower(f.Code + " " + f.Title + " " + f.PageURL + " " + f.Element + " " + f.Status + " " + f.Confidence)
 		fmt.Fprintf(&b, "<tr data-sev='%s' data-text='%s'>", f.Severity, esc(search))
 		fmt.Fprintf(&b, "<td class='sev %s'>%s</td>", f.Severity, f.Severity)
-		fmt.Fprintf(&b, "<td><code>%s</code><div class='meta'>%s</div>", esc(f.Code), esc(f.Title))
+		fmt.Fprintf(&b, "<td><code>%s</code>%s<div class='meta'>%s</div>", esc(f.Code), badges(f), esc(f.Title))
 		if f.Occurrences > 1 {
 			fmt.Fprintf(&b, "<div class='meta'>also on %d other pages</div>", f.Occurrences-1)
 		}
@@ -430,6 +442,81 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	return b.String()
 }
 
+// badges renders the gate verdict next to a finding: what kind of finding this
+// is matters as much as its severity once a baseline exists.
+func badges(f model.Finding) string {
+	var out string
+	add := func(class, text, title string) {
+		out += fmt.Sprintf(" <span class='badge %s' title='%s'>%s</span>", class, esc(title), esc(text))
+	}
+	switch f.Status {
+	case "new":
+		text := "new"
+		if f.NewPages > 0 {
+			text = fmt.Sprintf("new on %d page(s)", f.NewPages)
+		}
+		add("new", text, "not in the accepted baseline")
+	case "known":
+		add("known", "known", "accepted in the baseline; does not fail the run")
+	case "suppressed":
+		add("known", "suppressed", f.Suppression)
+	}
+	switch f.Confidence {
+	case "unconfirmed":
+		add("unconfirmed", "unconfirmed", "did not reproduce on a second load; does not fail the run")
+	case "confirmed":
+		add("confirmed", "confirmed", "reproduced on a second load")
+	}
+	return out
+}
+
+func gateLine(s model.Summary) string {
+	var parts []string
+	if s.Baseline != nil && !s.Baseline.Accepted {
+		parts = append(parts, fmt.Sprintf("%d new", s.Baseline.New), fmt.Sprintf("%d known", s.Baseline.Known))
+		if n := len(s.Baseline.Fixed); n > 0 {
+			parts = append(parts, fmt.Sprintf("%d fixed", n))
+		}
+	}
+	if s.Baseline != nil && s.Baseline.Accepted {
+		parts = append(parts, fmt.Sprintf("baseline written: %d finding(s) accepted", s.Baseline.Known))
+	}
+	if s.Suppressed > 0 {
+		parts = append(parts, fmt.Sprintf("%d suppressed", s.Suppressed))
+	}
+	if s.Unconfirmed > 0 {
+		parts = append(parts, fmt.Sprintf("%d unconfirmed", s.Unconfirmed))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Counts above are findings that can fail the run. " + strings.Join(parts, " · ")
+}
+
+func baselineHTML(s model.Summary) string {
+	if s.Baseline == nil || (len(s.Baseline.Fixed) == 0 && len(s.Baseline.NotReached) == 0) {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("<div class='start'><h2>Against the baseline</h2>")
+	if len(s.Baseline.Fixed) > 0 {
+		fmt.Fprintf(&b, "<div class='meta'>%d accepted finding(s) are gone:</div><ul>", len(s.Baseline.Fixed))
+		for _, e := range s.Baseline.Fixed {
+			fmt.Fprintf(&b, "<li><code>%s</code> %s %s</li>", esc(e.Code), esc(e.Element), esc(strings.Join(e.Templates, ", ")))
+		}
+		b.WriteString("</ul>")
+	}
+	if len(s.Baseline.NotReached) > 0 {
+		fmt.Fprintf(&b, "<div class='meta'>%d accepted finding(s) are not shown as fixed because this run did not reach their pages:</div><ul>", len(s.Baseline.NotReached))
+		for _, e := range s.Baseline.NotReached {
+			fmt.Fprintf(&b, "<li><code>%s</code> %s %s</li>", esc(e.Code), esc(e.Element), esc(strings.Join(e.Templates, ", ")))
+		}
+		b.WriteString("</ul>")
+	}
+	b.WriteString("</div>")
+	return b.String()
+}
+
 func countCode(findings []model.Finding, code string) int {
 	n := 0
 	for _, f := range findings {
@@ -589,6 +676,10 @@ func junit(p Payload) string {
 		var codes []string
 		var bodies []string
 		for _, f := range findings {
+			if !f.Gates() {
+				c.SystemOut = append(c.SystemOut, "not gating ("+f.Status+f.Confidence+") "+f.Code+": "+f.Title)
+				continue
+			}
 			switch f.Severity {
 			case model.Blocker, model.Critical, model.Major:
 				codes = append(codes, f.Code)
@@ -653,6 +744,9 @@ func markdown(p Payload) string {
 	for _, level := range []model.Severity{model.Blocker, model.Critical, model.Major, model.Minor, model.Info} {
 		fmt.Fprintf(&b, "| %s | %d |\n", level, p.Summary.Counts[level])
 	}
+	if line := gateLine(p.Summary); line != "" {
+		fmt.Fprintf(&b, "\n%s\n", line)
+	}
 	visual := "off"
 	if p.Summary.VisualEnabled {
 		visual = fmt.Sprintf("%d diff(s)", countCode(p.Findings, "E_VISUAL_DIFF"))
@@ -666,7 +760,14 @@ func markdown(p Payload) string {
 		b.WriteString("_none_\n")
 	}
 	for _, f := range p.Findings {
-		fmt.Fprintf(&b, "- **%s** `%s` %s — %s", f.Severity, f.Code, f.Title, f.PageURL)
+		tag := ""
+		if f.Status != "" {
+			tag += " [" + f.Status + "]"
+		}
+		if f.Confidence == "unconfirmed" {
+			tag += " [unconfirmed]"
+		}
+		fmt.Fprintf(&b, "- **%s** `%s`%s %s — %s", f.Severity, f.Code, tag, f.Title, f.PageURL)
 		if f.Element != "" {
 			fmt.Fprintf(&b, " — %s", f.Element)
 		}

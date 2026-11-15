@@ -20,6 +20,7 @@ import (
 	"afford/internal/auth"
 	"afford/internal/browser"
 	"afford/internal/config"
+	"afford/internal/gate"
 	"afford/internal/mcpserver"
 	"afford/internal/model"
 	"afford/internal/report"
@@ -93,6 +94,10 @@ Run options:
   --embed-images         inline screenshots in the HTML report
   --visual               compare screenshots against the baseline store
   --update-baseline      write current screenshots as the new baseline
+  --accept               write the current findings as the findings baseline (exit 0)
+  --baseline PATH        findings baseline file (default .afford/findings-baseline.json)
+  --no-baseline          ignore the findings baseline and suppression file
+  --suppress PATH        suppression file (default afford.suppress.toml)
   --timeout SECONDS      hard wall for the whole run (0 disables)
   --fail-on LEVEL        blocker | critical | major | minor | info | never
   --quiet                no console summary; artifacts only
@@ -252,8 +257,9 @@ func cmdRun(args []string) int {
 	)
 	var (
 		allowDestructive, allowDelete, allowSideEffects, noSubmit, headful, embedImages, noPrompt bool
-		visualEnabled, updateBaseline                                                             bool
+		visualEnabled, updateBaseline, accept, noBaseline                                         bool
 	)
+	var baselinePath, suppressPath string
 
 	fs.StringVar(&baseURL, "base-url", "", "target application")
 	fs.StringVar(&baseURL, "u", "", "alias for --base-url")
@@ -276,6 +282,10 @@ func cmdRun(args []string) int {
 	fs.BoolVar(&headful, "headful", false, "show the browser")
 	fs.BoolVar(&visualEnabled, "visual", false, "compare screenshots against the baseline store")
 	fs.BoolVar(&updateBaseline, "update-baseline", false, "write current screenshots as the new baseline")
+	fs.BoolVar(&accept, "accept", false, "write the current findings as the findings baseline")
+	fs.BoolVar(&noBaseline, "no-baseline", false, "ignore the findings baseline and suppression file")
+	fs.StringVar(&baselinePath, "baseline", "", "findings baseline file")
+	fs.StringVar(&suppressPath, "suppress", "", "suppression file")
 	fs.BoolVar(&embedImages, "embed-images", false, "inline screenshots")
 	fs.BoolVar(&noPrompt, "no-prompt", false, "never prompt for credentials")
 	fs.IntVar(&timeoutSecs, "timeout", -1, "hard wall in seconds")
@@ -345,6 +355,23 @@ func cmdRun(args []string) int {
 	if timeoutSecs >= 0 {
 		cfg.Run.TimeoutSecs = timeoutSecs
 	}
+	if baselinePath != "" {
+		cfg.Baseline.File = baselinePath
+	}
+	if suppressPath != "" {
+		cfg.Baseline.SuppressFile = suppressPath
+	}
+	if noBaseline {
+		cfg.Baseline.Disabled = true
+		cfg.Baseline.SuppressFile = ""
+	}
+	if accept {
+		if cfg.Baseline.Disabled {
+			fmt.Fprintln(os.Stderr, "afford: --accept and --no-baseline contradict each other")
+			return 2
+		}
+		cfg.Baseline.Accept = true
+	}
 	if username != "" {
 		_ = os.Setenv("AFFORD_USERNAME", username)
 	}
@@ -354,6 +381,21 @@ func cmdRun(args []string) int {
 	}
 	if !validFailOn(failOn) {
 		fmt.Fprintf(os.Stderr, "afford: --fail-on must be one of blocker, critical, major, minor, info, never\n")
+		return 2
+	}
+	if err := cfg.CheckMutationGuard(); err != nil {
+		fmt.Fprintf(os.Stderr, "afford: %v\n", err)
+		return 2
+	}
+
+	// A malformed suppression file is a configuration error, found before a
+	// browser starts rather than after the crawl.
+	if _, err := gate.LoadRules(cfg.Baseline.SuppressFile, time.Now().UTC()); err != nil {
+		fmt.Fprintf(os.Stderr, "afford: %v\n", err)
+		return 2
+	}
+	if _, err := gate.Load(cfg.Baseline.File); err != nil && !cfg.Baseline.Disabled {
+		fmt.Fprintf(os.Stderr, "afford: %v\n", err)
 		return 2
 	}
 
@@ -419,6 +461,9 @@ func cmdRun(args []string) int {
 		for _, level := range levels {
 			fmt.Printf("%-9s %d\n", level, summary.Counts[level])
 		}
+		if line := baselineLine(summary); line != "" {
+			fmt.Println(line)
+		}
 		fmt.Printf("\npages %d · controls %d/%d · forms %d/%d · payloads %d\n",
 			summary.PagesVisited, summary.ControlsProbed, summary.ControlsTotal,
 			summary.FormsProbed, summary.FormsTotal, summary.PayloadsSent)
@@ -428,6 +473,10 @@ func cmdRun(args []string) int {
 		fmt.Printf("report %s\n", reportPath)
 	}
 
+	if cfg.Baseline.Accept {
+		fmt.Printf("baseline written to %s\n", cfg.Baseline.File)
+		return 0
+	}
 	if tripped := trippedLevels(summary.Counts, failOn); len(tripped) > 0 {
 		if !quiet {
 			fmt.Printf("failing on %v\n", tripped)
@@ -435,6 +484,20 @@ func cmdRun(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func baselineLine(s model.Summary) string {
+	var parts []string
+	if b := s.Baseline; b != nil && !b.Accepted {
+		parts = append(parts, fmt.Sprintf("baseline: %d new · %d known · %d fixed", b.New, b.Known, len(b.Fixed)))
+	}
+	if s.Suppressed > 0 {
+		parts = append(parts, fmt.Sprintf("%d suppressed", s.Suppressed))
+	}
+	if s.Unconfirmed > 0 {
+		parts = append(parts, fmt.Sprintf("%d unconfirmed (reported, not gating)", s.Unconfirmed))
+	}
+	return strings.Join(parts, " · ")
 }
 
 func validFailOn(level string) bool {

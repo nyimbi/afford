@@ -6,12 +6,15 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/mxschmitt/playwright-go"
 
 	"afford/internal/config"
+	"afford/internal/discover"
 	"afford/internal/model"
 	"afford/internal/sanitize"
 )
@@ -96,6 +99,27 @@ type Snapshot struct {
 type Collector struct {
 	mu sync.Mutex
 	Snapshot
+	ignoreConsole  []*regexp.Regexp
+	ignoreRequests []*regexp.Regexp
+}
+
+func compileAll(patterns []string) []*regexp.Regexp {
+	out := make([]*regexp.Regexp, 0, len(patterns))
+	for _, p := range patterns {
+		if re, err := regexp.Compile(p); err == nil {
+			out = append(out, re)
+		}
+	}
+	return out
+}
+
+func matchesAny(res []*regexp.Regexp, s string) bool {
+	for _, re := range res {
+		if re.MatchString(s) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Collector) Bind(page playwright.Page) {
@@ -103,6 +127,9 @@ func (c *Collector) Bind(page playwright.Page) {
 		text := msg.Text()
 		if loc := msg.Location(); loc != nil && loc.URL != "" {
 			text = fmt.Sprintf("%s  [%s]", text, loc.URL)
+		}
+		if matchesAny(c.ignoreConsole, text) {
+			return
 		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -127,6 +154,9 @@ func (c *Collector) Bind(page playwright.Page) {
 	})
 	page.On("response", func(resp playwright.Response) {
 		req := resp.Request()
+		if matchesAny(c.ignoreRequests, req.URL()) {
+			return
+		}
 		c.mu.Lock()
 		c.Requests = append(c.Requests, model.RequestRecord{
 			URL:          sanitize.URL(req.URL()),
@@ -138,6 +168,9 @@ func (c *Collector) Bind(page playwright.Page) {
 		c.mu.Unlock()
 	})
 	page.On("requestfailed", func(req playwright.Request) {
+		if matchesAny(c.ignoreRequests, req.URL()) {
+			return
+		}
 		failure := "failed"
 		if err := req.Failure(); err != nil {
 			failure = err.Error()
@@ -199,19 +232,79 @@ func kindOf(resourceType string) string {
 	return "static"
 }
 
-func NewProbePage(ctx playwright.BrowserContext) (playwright.Page, *Collector, error) {
+func NewProbePage(ctx playwright.BrowserContext, cfg config.Config) (playwright.Page, *Collector, error) {
 	page, err := ctx.NewPage()
 	if err != nil {
 		return nil, nil, err
 	}
 	page.SetDefaultTimeout(8000)
-	collector := &Collector{}
+	collector := &Collector{
+		ignoreConsole:  compileAll(cfg.Policy.IgnoreConsole),
+		ignoreRequests: compileAll(cfg.Policy.IgnoreRequests),
+	}
 	collector.Bind(page)
 	return page, collector, nil
 }
 
-// Settle waits for load, then quiet network, then a stable node count.
+// Settle waits for load, then quiet network, then a stable node count, then the
+// app's own readiness condition if one is configured.
 func Settle(page playwright.Page, cfg config.Config) {
+	_ = SettleReady(page, cfg)
+}
+
+// readinessSelector picks the selector for the page's current path: a route
+// override wins over the global one.
+func readinessSelector(rawURL string, cfg config.Config) string {
+	path := rawURL
+	if i := strings.Index(path, "://"); i >= 0 {
+		path = path[i+3:]
+		if j := strings.Index(path, "/"); j >= 0 {
+			path = path[j:]
+		} else {
+			path = "/"
+		}
+	}
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
+	patterns := make([]string, 0, len(cfg.Readiness.Routes))
+	for pattern := range cfg.Readiness.Routes {
+		patterns = append(patterns, pattern)
+	}
+	sort.Strings(patterns)
+	for _, pattern := range patterns {
+		if discover.MatchPath(pattern, path) {
+			return cfg.Readiness.Routes[pattern]
+		}
+	}
+	return cfg.Readiness.Selector
+}
+
+// SettleReady is Settle that reports a readiness condition that never held. The
+// caller decides whether that is a finding; probes ignore it.
+func SettleReady(page playwright.Page, cfg config.Config) []string {
+	settleHeuristic(page, cfg)
+	var problems []string
+	timeout := float64(cfg.Readiness.TimeoutMS)
+	if selector := readinessSelector(page.URL(), cfg); selector != "" {
+		err := page.Locator(selector).First().WaitFor(playwright.LocatorWaitForOptions{
+			State: playwright.WaitForSelectorStateVisible, Timeout: playwright.Float(timeout),
+		})
+		if err != nil {
+			problems = append(problems, "readiness selector never became visible: "+selector)
+		}
+	}
+	for _, loading := range cfg.Readiness.Loading {
+		if err := page.Locator(loading).First().WaitFor(playwright.LocatorWaitForOptions{
+			State: playwright.WaitForSelectorStateHidden, Timeout: playwright.Float(timeout),
+		}); err != nil {
+			problems = append(problems, "loading indicator never went away: "+loading)
+		}
+	}
+	return problems
+}
+
+func settleHeuristic(page playwright.Page, cfg config.Config) {
 	errLoad := page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 		State:   playwright.LoadStateLoad,
 		Timeout: playwright.Float(float64(cfg.Limits.NavigationTimeoutMS)),

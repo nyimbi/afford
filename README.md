@@ -60,6 +60,14 @@ what was not tested. `afford checks` prints every check the tool performs.
 It does not prove business rules are correct. It proves the affordances it could
 reach did not crash, fail, or go inert, and it prints what it did not test.
 
+## Gating on change
+
+`afford run --accept` records today's findings as the baseline; later runs fail only on
+**new** ones. Control findings are re-probed and labelled `confirmed` or `unconfirmed`
+(unconfirmed never gates). `afford.suppress.toml` mutes a finding with an owner, a reason
+and an expiry. `[readiness]` declares what "rendered" means per route, and a mid-run
+logout is recovered by logging in again. See the user guide, *Gating on what changed*.
+
 ## Authentication
 ```toml
 [auth]

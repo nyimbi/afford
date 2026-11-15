@@ -29,6 +29,10 @@ type Result struct {
 	Creds     *playwright.HttpCredentials
 	Headers   map[string]string
 	Note      string
+	// Refresh logs in again with the credentials already resolved, for a session
+	// that expired or was ended mid-run (a logout control was clicked). Nil when
+	// the mode has nothing to refresh.
+	Refresh func() (Result, error)
 }
 
 var usernameSelectors = []string{
@@ -124,7 +128,19 @@ func Authenticate(host *browser.Host, cfg config.Config, allowPrompt bool) (Resu
 		return Result{}, err
 	}
 	_ = patterns
-	return Result{StatePath: statePath, Headers: headers, Note: "form login ok"}, nil
+	refresh := func() (Result, error) {
+		rctx, err := host.NewContext("", nil, nil)
+		if err != nil {
+			return Result{}, err
+		}
+		defer func() { _ = rctx.Close() }()
+		path, err := FormLogin(rctx, cfg, creds)
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{StatePath: path, Headers: headers, Note: "form login refreshed"}, nil
+	}
+	return Result{StatePath: statePath, Headers: headers, Note: "form login ok", Refresh: refresh}, nil
 }
 
 func FormLogin(ctx playwright.BrowserContext, cfg config.Config, creds Credentials) (string, error) {

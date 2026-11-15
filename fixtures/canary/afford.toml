@@ -17,3 +17,13 @@ success_url_contains = "/dashboard"
 [safety]
 allow_destructive = false
 submit_forms = true
+
+[readiness]
+timeout_ms = 3000
+[readiness.routes]
+"/late" = "#late-ready"
+"/never-ready" = "#never"
+
+[baseline]
+file = ".afford/canary/findings-baseline.json"
+suppress_file = ""

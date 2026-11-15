@@ -20,4 +20,7 @@ Go 1.22+, stdlib plus Playwright-Go. No cgo.
 - `Finding.Key()` includes `popup_url` and the visual baseline key so popup and visual findings do not merge into the page finding.
 - `make canary` is the gate. It starts `fixtures/canary`, runs the tool, and asserts every planted defect in `fixtures/canary/GROUND_TRUTH.md` was found. If it fails, the tool broke.
 - `make mcp-smoke` speaks JSON-RPC over stdio to the shipped binary: tools/list, check_page, inspect_page, off-origin refusal, crawl_site. A tool that lists but cannot be called is not a tool.
+- Gate layers, in order: confirm-on-reprobe, `[policy]` severity, suppression, baseline. Only `Finding.Gates()` findings count toward `Summary.Counts` and the exit code; `Summary.Totals` holds all. Fingerprints exclude the page; baseline entries own the union of every page sharing a fingerprint.
+- Shared page-level oracles live in `internal/pass` so `run` and `check` cannot diverge. Add new page checks there.
+- Each page visit uses a fresh context from the storage state; `visitSafely(nil, item)` is the unit-test seam, keep its signature.
 - gofmt before committing.

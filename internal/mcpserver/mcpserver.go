@@ -147,6 +147,14 @@ func (s *Server) checkPage(ctx context.Context, _ *mcp.CallToolRequest, in check
 	if err := s.ensure(); err != nil {
 		return nil, pageOut{}, err
 	}
+	if !in.ReadOnly {
+		guard := s.cfg
+		guard.Run.BaseURL = in.URL
+		guard.Safety.SubmitForms = in.Submit
+		if err := guard.CheckMutationGuard(); err != nil {
+			return nil, pageOut{}, err
+		}
+	}
 	callCtx, cancel := s.callContext(ctx)
 	defer cancel()
 	res, err := s.checker.Check(callCtx, in.URL, check.Options{
@@ -207,6 +215,9 @@ func (s *Server) crawlSite(ctx context.Context, _ *mcp.CallToolRequest, in crawl
 		}
 	}
 	cfg.Safety.SubmitForms = in.Submit
+	if err := cfg.CheckMutationGuard(); err != nil {
+		return nil, crawlOut{}, err
+	}
 
 	callCtx, cancel := s.callContext(ctx)
 	defer cancel()

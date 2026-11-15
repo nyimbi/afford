@@ -24,8 +24,10 @@ import (
 	"afford/internal/browser"
 	"afford/internal/config"
 	"afford/internal/discover"
+	"afford/internal/gate"
 	"afford/internal/model"
 	"afford/internal/oracles"
+	"afford/internal/pass"
 	"afford/internal/payloads"
 	"afford/internal/probe"
 	"afford/internal/sanitize"
@@ -75,6 +77,14 @@ type Runner struct {
 	skipped        map[string]int
 	started        time.Time
 	visitPage      func(playwright.BrowserContext, Item) []found
+
+	host       *browser.Host
+	session    auth.Result
+	sessionGen int
+	refreshes  int
+	sessionMu  sync.Mutex
+	reauthFlag map[string]bool // page URL → a re-login was requested for it
+	reauthDone map[string]bool // page URL → it already had its one retry
 }
 
 func New(cfg config.Config, st *store.Store, runID, baseDir string, ctx context.Context) *Runner {
@@ -82,6 +92,7 @@ func New(cfg config.Config, st *store.Store, runID, baseDir string, ctx context.
 		cfg: cfg, store: st, runID: runID, baseDir: baseDir, ctx: ctx,
 		seen: map[string]bool{}, templateCounts: map[string]int{},
 		notTested: map[string]int{}, skipped: map[string]int{},
+		reauthFlag: map[string]bool{}, reauthDone: map[string]bool{},
 	}
 	runner.visitPage = runner.visit
 	return runner
@@ -124,27 +135,12 @@ func (r *Runner) enqueue(next *[]Item, raw string, depth int, parent, how string
 
 func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary, error) {
 	r.started = time.Now().UTC()
-	contexts := make([]playwright.BrowserContext, 0, r.cfg.Limits.Concurrency)
-	for i := 0; i < r.cfg.Limits.Concurrency; i++ {
-		ctx, err := host.NewContext(authResult.StatePath, authResult.Creds, authResult.Headers)
-		if err != nil {
-			for _, c := range contexts {
-				_ = c.Close()
-			}
-			return model.Summary{}, fmt.Errorf("open browser context: %w", err)
-		}
-		contexts = append(contexts, ctx)
-	}
-	defer func() {
-		for _, c := range contexts {
-			_ = c.Close()
-		}
-	}()
-
-	pool := make(chan playwright.BrowserContext, len(contexts))
-	for _, c := range contexts {
-		pool <- c
-	}
+	r.host = host
+	r.session = authResult
+	// A fresh browser context per page: cookies and the session come from the
+	// storage state each time, but nothing one page wrote to localStorage can
+	// leak into the next. The semaphore bounds concurrency.
+	sem := make(chan struct{}, r.cfg.Limits.Concurrency)
 
 	var frontier []Item
 	r.enqueue(&frontier, r.cfg.Run.BaseURL, 0, "", "seed")
@@ -162,9 +158,9 @@ func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary,
 			wg.Add(1)
 			go func(it Item) {
 				defer wg.Done()
-				ctx := <-pool
-				defer func() { pool <- ctx }()
-				discovered <- r.visitSafely(ctx, it)
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				discovered <- r.visitIsolated(it)
 			}(item)
 		}
 		wg.Wait()
@@ -180,13 +176,107 @@ func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary,
 	}
 
 	r.finalChecks()
-	return r.summary(), nil
+	return r.finish()
+}
+
+// finish gates the findings (policy, suppression, baseline) and builds the
+// summary from the gated view, so the exit code and the report agree.
+func (r *Runner) finish() (model.Summary, error) {
+	pages, findings := r.store.Snapshot()
+	res, err := gate.Apply(findings, gate.Options{
+		Cfg: r.cfg, Pages: pages, Now: time.Now().UTC(),
+		Partial: r.notTested["run deadline reached"] > 0,
+	})
+	if err != nil {
+		return model.Summary{}, err
+	}
+	r.store.SetFindings(res.Findings)
+	summary := r.summary()
+	summary.Counts, summary.Totals = res.Counts, res.Totals
+	summary.Baseline, summary.Unconfirmed, summary.Suppressed = res.Baseline, res.Unconfirmed, res.Suppressed
+	return summary, nil
+}
+
+// newContext opens a context from the current session.
+func (r *Runner) newContext() (playwright.BrowserContext, int, error) {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+	ctx, err := r.host.NewContext(r.session.StatePath, r.session.Creds, r.session.Headers)
+	return ctx, r.sessionGen, err
+}
+
+// refreshSession logs in again unless another worker already did since gen.
+func (r *Runner) refreshSession(gen int) bool {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+	if gen != r.sessionGen {
+		return true
+	}
+	// A bounded number of re-logins: an app that keeps ending the session, or a
+	// role that cannot reach half the routes, must not turn into a login storm.
+	if r.session.Refresh == nil || r.refreshes >= 3 {
+		return false
+	}
+	r.refreshes++
+	fresh, err := r.session.Refresh()
+	if err != nil {
+		return false
+	}
+	fresh.Refresh = r.session.Refresh
+	r.session = fresh
+	r.sessionGen++
+	return true
+}
+
+// wantReauth reports whether a login redirect on this page should trigger one
+// re-login and one retry. After the retry the redirect is a finding.
+func (r *Runner) wantReauth(url string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Only a session that worked earlier in the run can have been lost; a first
+	// redirect is the auth wall, and it is reported as such.
+	if r.session.Refresh == nil || r.reauthDone[url] || r.stats.pagesVisited <= r.stats.authRedirects {
+		return false
+	}
+	r.reauthDone[url] = true
+	r.reauthFlag[url] = true
+	return true
+}
+
+func (r *Runner) takeReauth(url string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	flagged := r.reauthFlag[url]
+	delete(r.reauthFlag, url)
+	return flagged
+}
+
+// visitIsolated runs one page visit in its own context, and retries once with a
+// fresh session when the visit found itself logged out.
+func (r *Runner) visitIsolated(item Item) []found {
+	for attempt := 0; attempt < 2; attempt++ {
+		bctx, gen, err := r.newContext()
+		if err != nil {
+			r.bump(r.notTested, "could not open browser context", 1)
+			return nil
+		}
+		urls := r.visitSafely(bctx, item)
+		_ = bctx.Close()
+		if r.takeReauth(item.URL) {
+			r.bump(r.notTested, "session lost mid-run (re-authenticated)", 1)
+			if r.refreshSession(gen) {
+				continue
+			}
+		}
+		return urls
+	}
+	return nil
 }
 
 // visit captures one page and returns the URLs it discovered, at the depth they
 // should be crawled from.
 func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
-	page, collector, err := browser.NewProbePage(bctx)
+	page, collector, err := browser.NewProbePage(bctx, r.cfg)
 	if err != nil {
 		r.bump(r.notTested, "could not open page", 1)
 		return nil
@@ -198,6 +288,9 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
 	final := page.URL()
 	authRedirect := discover.IsLoginURL(final, r.cfg.Auth.LoginPathPatterns) &&
 		!discover.IsLoginURL(url, r.cfg.Auth.LoginPathPatterns)
+	if authRedirect && r.wantReauth(item.URL) {
+		return nil
+	}
 	if authRedirect {
 		r.mu.Lock()
 		r.stats.authRedirects++
@@ -237,33 +330,10 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
 	r.mu.Unlock()
 	r.compareVisual(url, discover.Template(url), screenshotRel)
 
-	textSample, _ := page.Evaluate("() => (document.body ? document.body.innerText : '').slice(0, 1500)")
-	sample, _ := textSample.(string)
-	obs := model.Observation{
-		URLBefore:       url,
-		URLAfter:        final,
-		Title:           scanResult.Title,
-		Status:          status,
-		BodyLen:         scanResult.BodyLen,
-		Requests:        collector.SnapshotCopy().Requests,
-		ConsoleErrors:   collector.SnapshotCopy().ConsoleErrors,
-		ConsoleWarnings: collector.SnapshotCopy().ConsoleWarnings,
-		PageErrors:      collector.SnapshotCopy().PageErrors,
-		Dialogs:         collector.SnapshotCopy().Dialogs,
-		Extra: map[string]any{
-			"overflow_x":        scanResult.OverflowX,
-			"scroll_width":      scanResult.ScrollWidth,
-			"viewport_width":    scanResult.ViewportWidth,
-			"text_sample":       sample,
-			"interactive_count": len(visible),
-			"auth_redirect":     authRedirect,
-		},
-	}
-	r.emit(url, "capture", "", obs, "capture", nil)
-	for _, f := range append(oracles.Unlabeled(visible, url), oracles.EmptyHref(visible, url)...) {
-		r.store.AddFinding(f)
-	}
-	for _, f := range oracles.OptionsAudit(visible, url) {
+	obs, captureFindings := pass.Capture(page, collector, r.cfg, url, final, authRedirect, load, scanResult)
+	_ = obs
+	r.store.AddProbe(url)
+	for _, f := range captureFindings {
 		r.store.AddFinding(f)
 	}
 	if shotErr != nil {
@@ -319,14 +389,20 @@ func (r *Runner) shoot(page playwright.Page, url string) (string, error) {
 	return relative, nil
 }
 
+func (r *Runner) debugOn() bool { return os.Getenv("AFFORD_DEBUG") != "" }
+
+func (r *Runner) debug(pageURL, contextKind string, obs model.Observation, el *model.Element) {
+	element := ""
+	if el != nil {
+		element = el.Tag + " " + el.Name
+	}
+	fmt.Fprintf(os.Stderr, "[debug] %-9s %-30s effect=%-9s err=%q pageerrors=%d requests=%d %s\n",
+		contextKind, pageURL, obs.Effect, obs.ActionError, len(obs.PageErrors), len(obs.Requests), element)
+}
+
 func (r *Runner) emit(pageURL, kind, payload string, obs model.Observation, contextKind string, el *model.Element) {
-	if os.Getenv("AFFORD_DEBUG") != "" {
-		element := ""
-		if el != nil {
-			element = el.Tag + " " + el.Name
-		}
-		fmt.Fprintf(os.Stderr, "[debug] %-9s %-30s effect=%-9s err=%q pageerrors=%d requests=%d %s\n",
-			contextKind, pageURL, obs.Effect, obs.ActionError, len(obs.PageErrors), len(obs.Requests), element)
+	if r.debugOn() {
+		r.debug(pageURL, contextKind, obs, el)
 	}
 	r.store.AddProbe(pageURL)
 	for _, f := range oracles.Evaluate(obs, pageURL, contextKind, el) {
@@ -403,7 +479,20 @@ func (r *Runner) probeControls(
 		controls[c.Idx] = c
 	}
 	attempts := 0
+	// Controls that match the destructive vocabulary and are permitted go last:
+	// a logout or delete can end the session or remove the page's own subject,
+	// and every probe after it would measure the wreckage.
+	ordered := make([]model.Element, 0, len(scanResult.Controls))
+	var guarded []model.Element
 	for _, el := range scanResult.Controls {
+		if payloads.DestructiveKind(el, r.cfg.Safety.ExtraDestructive) != "" {
+			guarded = append(guarded, el)
+		} else {
+			ordered = append(ordered, el)
+		}
+	}
+	ordered = append(ordered, guarded...)
+	for _, el := range ordered {
 		if attempts >= r.cfg.Limits.MaxControlsPerPage {
 			r.bump(r.notTested, "control budget per page", 1)
 			break
@@ -444,9 +533,14 @@ func (r *Runner) probeControls(
 		r.mu.Lock()
 		r.stats.controlsProbed++
 		r.mu.Unlock()
-		obs := probe.ProbeControl(bctx, page, collector, r.cfg, url, el, filepath.Join(r.baseDir, "popups"))
-		pointedTo := el
-		r.emit(url, "control", "effect="+obs.Effect, obs, "action", &pointedTo)
+		obs, controlFindings := pass.Control(bctx, page, collector, r.cfg, url, el, filepath.Join(r.baseDir, "popups"))
+		r.store.AddProbe(url)
+		if r.debugOn() {
+			r.debug(url, "action", obs, &el)
+		}
+		for _, f := range controlFindings {
+			r.store.AddFinding(f)
+		}
 		if obs.Popups > 0 {
 			f := model.NewFinding("E_NEW_TAB", url)
 			f.Element = fmt.Sprintf("%s “%s”", el.Tag, el.Name)

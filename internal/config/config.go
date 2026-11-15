@@ -4,9 +4,14 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
+	"path"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"afford/internal/model"
 )
 
 type Config struct {
@@ -19,6 +24,61 @@ type Config struct {
 	Uploads UploadsConfig `toml:"uploads"`
 	Popups  PopupsConfig  `toml:"popups"`
 	Visual  VisualConfig  `toml:"visual"`
+
+	Readiness ReadinessConfig `toml:"readiness"`
+	Policy    PolicyConfig    `toml:"policy"`
+	Baseline  BaselineConfig  `toml:"baseline"`
+	Fixtures  FixturesConfig  `toml:"fixtures"`
+	Routes    RoutesConfig    `toml:"routes"`
+}
+
+// FixturesConfig names commands that seed and clean the data a run needs. Both
+// receive AFFORD_RUN_ID and AFFORD_BASE_URL in their environment.
+type FixturesConfig struct {
+	Setup       string `toml:"setup"`
+	Teardown    string `toml:"teardown"`
+	TimeoutSecs int    `toml:"timeout_secs"`
+}
+
+// RoutesConfig enumerates URLs a link crawl cannot reach.
+type RoutesConfig struct {
+	Sitemap  bool     `toml:"sitemap"`
+	Manifest bool     `toml:"manifest"`
+	Extra    []string `toml:"extra"`
+}
+
+// ReadinessConfig tells afford when a page is done rendering. The default
+// heuristic (load, quiet network, stable node count) measures a page mid-render
+// whenever data arrives late; a selector is the app's own statement that it is
+// ready.
+type ReadinessConfig struct {
+	// Selector must be visible before the page counts as ready.
+	Selector string `toml:"selector"`
+	// Loading selectors must be gone (hidden or detached) before the page is ready.
+	Loading []string `toml:"loading"`
+	// Routes overrides Selector per path glob.
+	Routes    map[string]string `toml:"routes"`
+	TimeoutMS int               `toml:"timeout_ms"`
+}
+
+// PolicyConfig adjusts what counts as a finding without editing the catalogue.
+type PolicyConfig struct {
+	// Severity maps a finding code to blocker|critical|major|minor|info|off.
+	Severity map[string]string `toml:"severity"`
+	// IgnoreConsole and IgnoreRequests are regexes; a console message or request
+	// URL that matches never reaches an oracle (third-party noise).
+	IgnoreConsole  []string `toml:"ignore_console"`
+	IgnoreRequests []string `toml:"ignore_requests"`
+}
+
+// BaselineConfig is the findings baseline: known defects that must not fail the
+// gate, so the gate can be switched on for an app that already has some.
+type BaselineConfig struct {
+	File         string `toml:"file"`
+	SuppressFile string `toml:"suppress_file"`
+	Disabled     bool   `toml:"disabled"`
+	// Accept is set by --accept: write the current findings as the baseline.
+	Accept bool `toml:"-"`
 }
 
 // VisualConfig governs screenshot comparison. Off by default: a visual gate is
@@ -69,6 +129,10 @@ type RunConfig struct {
 	EmbedImages bool   `toml:"embed_images"`
 	Browser     string `toml:"browser"`
 	TimeoutSecs int    `toml:"timeout_secs"`
+	// Confirm re-probes a control that produced a suspect finding once from a
+	// fresh load; a finding that does not reproduce is reported as unconfirmed
+	// and does not fail the gate.
+	Confirm bool `toml:"confirm"`
 }
 
 type ScopeConfig struct {
@@ -102,6 +166,65 @@ type SafetyConfig struct {
 	AllowSideEffects bool     `toml:"allow_side_effects"`
 	SubmitForms      bool     `toml:"submit_forms"`
 	ExtraDestructive []string `toml:"extra_destructive"`
+	// MutationHosts lists host globs where afford may submit forms or click
+	// granted controls. Empty means the built-in non-production set; "*" lifts
+	// the guard.
+	MutationHosts []string `toml:"mutation_hosts"`
+}
+
+// DefaultMutationHosts are hosts a test run may safely write to: loopback,
+// private networks, and conventionally non-production names.
+var DefaultMutationHosts = []string{
+	"localhost", "127.*", "[::1]", "10.*", "192.168.*", "172.16.*", "172.17.*", "172.18.*",
+	"172.19.*", "172.2?.*", "172.30.*", "172.31.*", "*.localhost", "*.test", "*.local",
+	"*.internal", "*.lan", "staging.*", "*.staging.*", "stage.*", "*.stage.*", "dev.*",
+	"*.dev.*", "qa.*", "*.qa.*", "uat.*", "*.uat.*", "test.*", "*.test.*", "preview.*",
+	"*-staging.*", "*-stage.*", "*-dev.*", "*-qa.*", "*-uat.*", "*-test.*",
+}
+
+// Mutates reports whether this configuration would write to the application:
+// submit forms or click anything in a granted class.
+func (s SafetyConfig) Mutates() bool {
+	return s.SubmitForms || s.AllowDestructive || s.AllowDelete || s.AllowSideEffects
+}
+
+// MutationAllowed reports whether host (no port) may be written to.
+func (s SafetyConfig) MutationAllowed(host string) bool {
+	list := s.MutationHosts
+	if len(list) == 0 {
+		list = DefaultMutationHosts
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	for _, pat := range list {
+		pat = strings.ToLower(strings.TrimSpace(pat))
+		if pat == "*" {
+			return true
+		}
+		if ok, _ := path.Match(pat, host); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckMutationGuard returns an error when the config would write to a host
+// the allowlist does not cover. This is the production guard: a crawl that
+// submits forms against a live site creates real rows.
+func (c Config) CheckMutationGuard() error {
+	if !c.Safety.Mutates() {
+		return nil
+	}
+	u, err := url.Parse(c.Run.BaseURL)
+	if err != nil || u.Hostname() == "" {
+		return nil
+	}
+	if c.Safety.MutationAllowed(u.Hostname()) {
+		return nil
+	}
+	return fmt.Errorf("refusing to write to %s: it is not in [safety] mutation_hosts "+
+		"(default: localhost, private ranges, *.test, *.local, staging/dev/qa names). "+
+		"Use --no-submit for a read-only run, or set mutation_hosts = [\"%s\"] to allow this host, "+
+		"or [\"*\"] to lift the guard", u.Hostname(), u.Hostname())
 }
 
 // Permits reports whether the configured grants cover a permission class.
@@ -135,7 +258,7 @@ func Default() Config {
 	return Config{
 		Run: RunConfig{
 			Out: ".afford", Depth: "standard", Viewport: []int{1280, 900},
-			Browser: "chromium", TimeoutSecs: 900,
+			Browser: "chromium", TimeoutSecs: 900, Confirm: true,
 		},
 		Scope: ScopeConfig{
 			Include: []string{"/**"},
@@ -153,10 +276,12 @@ func Default() Config {
 			NavigationTimeoutMS: 15000, ProbeTimeoutMS: 8000,
 			SettleMS: 1200, QuietMS: 350,
 		},
-		MCP:     MCPConfig{CallTimeoutSecs: 120, MaxControls: 40},
-		Uploads: UploadsConfig{},
-		Popups:  PopupsConfig{Mode: "capture", Max: 5},
-		Visual:  VisualConfig{ThresholdPct: 0.1, Tolerance: 12, Dir: ".afford/baselines"},
+		MCP:       MCPConfig{CallTimeoutSecs: 120, MaxControls: 40},
+		Uploads:   UploadsConfig{},
+		Popups:    PopupsConfig{Mode: "capture", Max: 5},
+		Visual:    VisualConfig{ThresholdPct: 0.1, Tolerance: 12, Dir: ".afford/baselines"},
+		Readiness: ReadinessConfig{TimeoutMS: 8000},
+		Baseline:  BaselineConfig{File: ".afford/findings-baseline.json", SuppressFile: "afford.suppress.toml"},
 	}
 }
 
@@ -214,6 +339,24 @@ func (c *Config) Validate() error {
 	if c.Visual.ThresholdPct < 0 {
 		problems = append(problems, "visual.threshold_pct must be >= 0")
 	}
+	for code, level := range c.Policy.Severity {
+		if _, ok := model.Catalogue[code]; !ok {
+			problems = append(problems, "policy.severity: unknown finding code "+code)
+		}
+		switch level {
+		case "blocker", "critical", "major", "minor", "info", "off":
+		default:
+			problems = append(problems, "policy.severity."+code+" must be blocker|critical|major|minor|info|off")
+		}
+	}
+	for _, pat := range append(append([]string(nil), c.Policy.IgnoreConsole...), c.Policy.IgnoreRequests...) {
+		if _, err := regexp.Compile(pat); err != nil {
+			problems = append(problems, "policy ignore pattern "+pat+": "+err.Error())
+		}
+	}
+	if c.Readiness.TimeoutMS < 0 {
+		problems = append(problems, "readiness.timeout_ms must be >= 0")
+	}
 	if c.MCP.MaxControls < 1 {
 		problems = append(problems, "mcp.max_controls must be at least 1")
 	}
@@ -258,6 +401,27 @@ tolerance = 12            # per-channel difference treated as identical
 # mask = [".timestamp", ".live-indicator"]
 # ignore = ["/admin/**"]
 # dir = ".afford/baselines"
+
+[readiness]
+# The app's own statement that it has finished rendering.
+# selector = "[data-ready]"
+# loading = [".spinner", "[aria-busy=true]"]
+# timeout_ms = 8000
+# [readiness.routes]
+# "/reports/**" = "#chart-rendered"
+
+[policy]
+# Re-label or silence a check for this app.
+# [policy.severity]
+# E_UUID_EXPOSED = "major"
+# E_NO_TITLE = "off"
+# ignore_console = ["googletagmanager", "Failed to load resource.*analytics"]
+# ignore_requests = ["^https://(www\\.)?google-analytics\\.com/"]
+
+[baseline]
+# afford run --accept writes this file; later runs fail only on new findings.
+file = ".afford/findings-baseline.json"
+suppress_file = "afford.suppress.toml"
 
 [popups]
 mode = "capture"          # capture | off

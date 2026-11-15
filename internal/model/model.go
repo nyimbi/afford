@@ -111,6 +111,10 @@ var specs = []FindingSpec{
 		"Enter may still submit it. Recorded for coverage."},
 	{"E_DESTRUCTIVE_SKIPPED", Info, "Destructive control skipped",
 		"The control's name matched the destructive vocabulary, so it was not clicked. Deletion needs --allow-delete; paying, sending, publishing and logging out need --allow-side-effects. --allow-destructive grants both. Only do that on an environment whose data can be thrown away."},
+	{"E_NOT_READY", Major, "Page never reached its readiness condition",
+		"The configured readiness selector never became visible, or a loading indicator never went away, within the timeout. Everything measured on this page was measured mid-render, so treat its other findings with suspicion."},
+	{"E_SUPPRESSION_EXPIRED", Major, "A finding suppression has expired",
+		"A suppression rule passed its expiry date. The findings it hid are active again until someone re-justifies or removes the rule."},
 	{"E_OUT_OF_SCOPE", Info, "Link outside scope not followed",
 		"Off-origin or excluded by the include/exclude rules."},
 }
@@ -143,6 +147,21 @@ type Finding struct {
 	Detail      map[string]any `json:"detail,omitempty"`
 	AlsoOn      []string       `json:"also_on,omitempty"`
 	Occurrences int            `json:"occurrences,omitempty"`
+	// Confidence is "confirmed" when a re-probe from a fresh load reproduced the
+	// finding, "unconfirmed" when it did not, empty when no re-probe applied.
+	Confidence string `json:"confidence,omitempty"`
+	// Status is set against the findings baseline: new, known or suppressed.
+	Status      string `json:"status,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// Suppression is the reason of the rule that hid this finding.
+	Suppression string `json:"suppression,omitempty"`
+	NewPages    int    `json:"new_pages,omitempty"`
+}
+
+// Gates reports whether the finding can fail a run: unconfirmed, known and
+// suppressed findings are reported but do not gate.
+func (f Finding) Gates() bool {
+	return f.Confidence != "unconfirmed" && f.Status != "known" && f.Status != "suppressed"
 }
 
 // NewFinding fills severity and prose from the catalogue. It panics on an
@@ -361,21 +380,46 @@ type Page struct {
 }
 
 type Summary struct {
-	RunID           string           `json:"run_id"`
-	BaseURL         string           `json:"base_url"`
-	StartedAt       time.Time        `json:"started_at"`
-	FinishedAt      time.Time        `json:"finished_at"`
-	PagesDiscovered int              `json:"pages_discovered"`
-	PagesVisited    int              `json:"pages_visited"`
-	PagesFailed     int              `json:"pages_failed"`
-	ControlsTotal   int              `json:"controls_total"`
-	ControlsProbed  int              `json:"controls_probed"`
-	ControlsSkipped int              `json:"controls_skipped"`
-	FormsTotal      int              `json:"forms_total"`
-	FormsProbed     int              `json:"forms_probed"`
-	InputsSwept     int              `json:"inputs_swept"`
-	PayloadsSent    int              `json:"payloads_sent"`
-	Counts          map[Severity]int `json:"counts"`
-	NotTested       []string         `json:"not_tested"`
-	VisualEnabled   bool             `json:"visual_enabled"`
+	RunID           string    `json:"run_id"`
+	BaseURL         string    `json:"base_url"`
+	StartedAt       time.Time `json:"started_at"`
+	FinishedAt      time.Time `json:"finished_at"`
+	PagesDiscovered int       `json:"pages_discovered"`
+	PagesVisited    int       `json:"pages_visited"`
+	PagesFailed     int       `json:"pages_failed"`
+	ControlsTotal   int       `json:"controls_total"`
+	ControlsProbed  int       `json:"controls_probed"`
+	ControlsSkipped int       `json:"controls_skipped"`
+	FormsTotal      int       `json:"forms_total"`
+	FormsProbed     int       `json:"forms_probed"`
+	InputsSwept     int       `json:"inputs_swept"`
+	PayloadsSent    int       `json:"payloads_sent"`
+	// Counts holds the findings that can fail the run. Totals holds all of them.
+	Counts        map[Severity]int `json:"counts"`
+	Totals        map[Severity]int `json:"totals,omitempty"`
+	NotTested     []string         `json:"not_tested"`
+	VisualEnabled bool             `json:"visual_enabled"`
+	Baseline      *BaselineSummary `json:"baseline,omitempty"`
+	Unconfirmed   int              `json:"unconfirmed,omitempty"`
+	Suppressed    int              `json:"suppressed,omitempty"`
+}
+
+// BaselineEntry is one accepted finding.
+type BaselineEntry struct {
+	Fingerprint string   `json:"fingerprint"`
+	Code        string   `json:"code"`
+	Severity    Severity `json:"severity"`
+	Element     string   `json:"element,omitempty"`
+	Title       string   `json:"title"`
+	Templates   []string `json:"templates"`
+}
+
+// BaselineSummary says how this run compares with the accepted baseline.
+type BaselineSummary struct {
+	File       string          `json:"file"`
+	Accepted   bool            `json:"accepted,omitempty"`
+	New        int             `json:"new"`
+	Known      int             `json:"known"`
+	Fixed      []BaselineEntry `json:"fixed,omitempty"`
+	NotReached []BaselineEntry `json:"not_reached,omitempty"`
 }

@@ -161,8 +161,42 @@ See [Authentication](#authentication) for the modes.
 | `allow_side_effects` | `false` | Click pay, send, publish, deploy, logout, approve and similar. |
 | `allow_destructive` | `false` | Umbrella grant for both classes above. |
 | `extra_destructive` | `[]` | Additional phrases treated as deletion. |
+| `mutation_hosts` | built-in list | Host globs afford may write to. Default: localhost, loopback, private ranges, `*.test`, `*.local`, and staging/dev/qa/uat names. `["*"]` lifts the guard. |
+
+With any write enabled (`submit_forms` or a grant), a base URL outside `mutation_hosts` exits 2 before a browser starts. Use `--no-submit` for a read-only run against production.
 
 See [Safety and mutation grants](#safety-and-mutation-grants).
+
+### `[readiness]`
+
+A page is "ready" when it has rendered the thing a user came for. Without a
+declaration afford uses a quiet-network, quiet-DOM heuristic; a page that renders
+late fools it, so declare what ready means.
+
+| key | default | meaning |
+|---|---|---|
+| `selector` | `""` | CSS selector that must be visible before the scan. |
+| `loading` | `[]` | Selectors (spinners, skeletons) that must be gone. |
+| `routes` | `{}` | Per-route overrides: `"/late" = "#late-ready"`. Keys are route templates. |
+| `timeout_ms` | `8000` | How long to wait. Expiry raises `E_NOT_READY`; the scan still runs. |
+
+### `[policy]`
+
+| key | meaning |
+|---|---|
+| `severity` | Per-code override: `E_OVERFLOW_X = "off"` or `"critical"`. `off` drops the code. |
+| `ignore_console` | Regexes; matching console messages are not findings. |
+| `ignore_requests` | Regexes; matching failed or non-OK requests are not findings. |
+
+### `[baseline]`
+
+| key | default | meaning |
+|---|---|---|
+| `file` | `.afford/findings-baseline.json` | Accepted findings. |
+| `suppress_file` | `afford.suppress.toml` | Rules that mute a finding on purpose. |
+| `disabled` | `false` | Ignore both files (`--no-baseline`). |
+
+See [Gating on what changed](#gating-on-what-changed).
 
 ### `[limits]`
 
@@ -381,6 +415,45 @@ The catalogue is versioned in code. `afford checks` prints it worst-first, and
 Severity is a starting point for triage, not a claim about impact. A `minor`
 contrast problem on a checkout page may matter more than a `major` dead control
 on an admin screen.
+
+## Gating on what changed
+
+A legacy app has hundreds of findings; a gate that fails on all of them is switched
+off within a week. afford gates in four layers, in this order:
+
+1. **Confirmation.** A control finding (`E_DEAD_CONTROL`, `E_500_ON_ACTION` and
+   similar) is probed a second time from a fresh load. If the second probe disagrees
+   the finding is `unconfirmed`: reported, never gating. `[run] confirm = false`
+   turns this off.
+2. **Policy.** `[policy] severity` re-grades or drops a code.
+3. **Suppression.** `afford.suppress.toml` mutes one finding on purpose:
+
+   ```toml
+   [[suppress]]
+   code = "E_CONSOLE_ERROR"
+   page = "/console"          # route glob, optional
+   element = "*widget*"       # glob, optional
+   reason = "vendor widget, tracked upstream"
+   owner = "web-team"
+   expires = "2027-03-01"
+   ```
+
+   `reason`, `owner` and `expires` are required. A rule past its expiry stops
+   muting and raises `E_SUPPRESSION_EXPIRED`.
+4. **Baseline.** `afford run --accept` records every current finding in
+   `.afford/findings-baseline.json`. Later runs label each finding `new` or `known`
+   and list baseline entries now `fixed`. Only new findings gate. Commit the file.
+
+A finding's identity is its code, its normalized element and a per-code discriminator.
+The page is not part of it, so renaming a route does not make old findings new; a
+finding that spreads to a template outside its baseline entry is new. An entry counts
+as fixed only if the run visited every page it lived on; otherwise it is "not reached".
+After a run that hit its deadline nothing counts as fixed.
+
+Sessions: each page visit gets a fresh browser context built from the saved login, so
+client storage never leaks between pages. If a click ends the session (a logout
+control with `--allow-side-effects`), afford logs in again, up to three times, and
+probes controls that could do this last.
 
 ## Reading the report
 

@@ -138,6 +138,18 @@ func (s *Store) merge(f model.Finding) {
 	s.Findings = append(s.Findings, f)
 }
 
+// SetFindings replaces the in-memory findings with their gated form (status,
+// fingerprint, suppression). The JSONL log keeps the raw events.
+func (s *Store) SetFindings(findings []model.Finding) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Findings = append([]model.Finding(nil), findings...)
+	s.index = map[string]int{}
+	for i, f := range s.Findings {
+		s.index[f.Key()] = i
+	}
+}
+
 func (s *Store) AddLink(link model.LinkRecord) {
 	s.mu.Lock()
 	s.Links = append(s.Links, link)

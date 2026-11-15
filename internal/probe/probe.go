@@ -25,8 +25,9 @@ type Load struct {
 	OK        bool
 	Status    int
 	FinalURL  string
-	LoadMS    int64 // browser loadEventEnd
-	SettledMS int64 // wall clock from navigation to settled
+	LoadMS    int64    // browser loadEventEnd
+	SettledMS int64    // wall clock from navigation to settled
+	NotReady  []string // readiness conditions that never held
 	Err       error
 }
 
@@ -70,7 +71,7 @@ func Reset(page playwright.Page, cfg config.Config, url string) Load {
 			SettledMS: time.Since(started).Milliseconds(),
 		}
 	}
-	browser.Settle(page, cfg)
+	notReady := browser.SettleReady(page, cfg)
 	settled := time.Since(started).Milliseconds()
 	status := 0
 	if response != nil {
@@ -82,7 +83,7 @@ func Reset(page playwright.Page, cfg config.Config, url string) Load {
 	}
 	return Load{
 		OK: true, Status: status, FinalURL: page.URL(),
-		LoadMS: loadMS, SettledMS: settled,
+		LoadMS: loadMS, SettledMS: settled, NotReady: notReady,
 	}
 }
 

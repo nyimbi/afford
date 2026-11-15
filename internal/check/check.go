@@ -23,8 +23,10 @@ import (
 	"afford/internal/browser"
 	"afford/internal/config"
 	"afford/internal/discover"
+	"afford/internal/gate"
 	"afford/internal/model"
 	"afford/internal/oracles"
+	"afford/internal/pass"
 	"afford/internal/payloads"
 	"afford/internal/probe"
 	"afford/internal/visual"
@@ -61,6 +63,9 @@ type Result struct {
 func (r Result) Counts() map[string]int {
 	out := map[string]int{}
 	for _, f := range r.Findings {
+		if !f.Gates() {
+			continue
+		}
 		out[string(f.Severity)]++
 	}
 	return out
@@ -69,7 +74,7 @@ func (r Result) Counts() map[string]int {
 // OK reports whether no finding at major severity or worse survived.
 func (r Result) OK() bool {
 	for _, f := range r.Findings {
-		if f.Rank() <= model.SeverityOrder[model.Major] {
+		if f.Gates() && f.Rank() <= model.SeverityOrder[model.Major] {
 			return false
 		}
 	}
@@ -112,7 +117,27 @@ func (c *Checker) allowed(raw string) bool {
 	return false
 }
 
+// Check probes one page and applies the same policy, suppression and baseline
+// the crawler does, so an agent and CI see one verdict.
 func (c *Checker) Check(ctx context.Context, rawURL string, opts Options) (Result, error) {
+	result, err := c.check(ctx, rawURL, opts)
+	if err != nil {
+		return result, err
+	}
+	cfg := c.cfg
+	cfg.Baseline.Accept = false
+	gated, gerr := gate.Apply(result.Findings, gate.Options{
+		Cfg: cfg, Now: time.Now().UTC(), Partial: true,
+		Pages: []model.Page{{URL: rawURL, Template: discover.Template(rawURL)}},
+	})
+	if gerr != nil {
+		return result, gerr
+	}
+	result.Findings = gated.Findings
+	return result, nil
+}
+
+func (c *Checker) check(ctx context.Context, rawURL string, opts Options) (Result, error) {
 	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
 		return Result{}, fmt.Errorf("url must be absolute http(s), got %q", rawURL)
 	}
@@ -144,7 +169,7 @@ func (c *Checker) Check(ctx context.Context, rawURL string, opts Options) (Resul
 		return Result{}, fmt.Errorf("open browser context: %w", err)
 	}
 	defer func() { _ = bctx.Close() }()
-	page, collector, err := browser.NewProbePage(bctx)
+	page, collector, err := browser.NewProbePage(bctx, cfg)
 	if err != nil {
 		return Result{}, fmt.Errorf("open page: %w", err)
 	}
@@ -177,39 +202,9 @@ func (c *Checker) Check(ctx context.Context, rawURL string, opts Options) (Resul
 		}
 	}
 
-	snapshot := collector.SnapshotCopy()
-	textSample, _ := page.Evaluate("() => (document.body ? document.body.innerText : '').slice(0, 1500)")
-	sample, _ := textSample.(string)
-	visible := make([]model.Element, 0, len(scanResult.Controls))
-	for _, el := range scanResult.Controls {
-		if el.Visible {
-			visible = append(visible, el)
-		}
-	}
-	capture := model.Observation{
-		URLBefore:       rawURL,
-		URLAfter:        result.FinalURL,
-		Title:           scanResult.Title,
-		Status:          load.Status,
-		BodyLen:         scanResult.BodyLen,
-		Requests:        snapshot.Requests,
-		ConsoleErrors:   snapshot.ConsoleErrors,
-		ConsoleWarnings: snapshot.ConsoleWarnings,
-		PageErrors:      snapshot.PageErrors,
-		Dialogs:         snapshot.Dialogs,
-		Extra: map[string]any{
-			"overflow_x":        scanResult.OverflowX,
-			"scroll_width":      scanResult.ScrollWidth,
-			"viewport_width":    scanResult.ViewportWidth,
-			"text_sample":       sample,
-			"interactive_count": len(visible),
-			"auth_redirect":     result.AuthRedirect,
-		},
-	}
-	add(oracles.Evaluate(capture, result.FinalURL, "capture", nil)...)
-	add(oracles.Unlabeled(visible, result.FinalURL)...)
-	add(oracles.EmptyHref(visible, result.FinalURL)...)
-	add(oracles.OptionsAudit(visible, result.FinalURL)...)
+	visible := pass.Visible(scanResult.Controls)
+	_, captured := pass.Capture(page, collector, cfg, result.FinalURL, result.FinalURL, result.AuthRedirect, load, scanResult)
+	add(captured...)
 	if result.AuthRedirect {
 		f := model.NewFinding("E_AUTH_REDIRECT", rawURL)
 		f.Detail["redirected_to"] = result.FinalURL
@@ -342,16 +337,8 @@ func (c *Checker) probeControls(
 			continue
 		}
 		probed++
-		obs := probe.ProbeControl(bctx, page, collector, cfg, rawURL, el,
+		obs, controlFindings := pass.Control(bctx, page, collector, cfg, rawURL, el,
 			filepath.Join(cfg.Run.Out, "mcp", "popups"))
-		pointedTo := el
-		controlFindings := oracles.Evaluate(obs, rawURL, "action", &pointedTo)
-		for i := range controlFindings {
-			controlFindings[i].Payload = "effect=" + obs.Effect
-			if len(controlFindings[i].Evidence) == 0 {
-				controlFindings[i].Evidence = oracles.FallbackEvidence(obs)
-			}
-		}
 		add(controlFindings...)
 		if obs.Popups > 0 {
 			f := model.NewFinding("E_NEW_TAB", rawURL)

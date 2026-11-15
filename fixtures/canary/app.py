@@ -6,10 +6,18 @@ broken, not the app. Ground truth lives in GROUND_TRUTH.md.
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 app = FastAPI(title="afford canary")
+
+# Live sessions. Logging out removes the session server-side, so every browser
+# context sharing that storage state is logged out at once, as in a real app.
+SESSIONS: set[str] = set()
+# Toggles the baseline round trip flips between runs.
+MUTATE = {"plant": False, "fix_console": False}
 
 NAV = """
 <nav>
@@ -53,7 +61,7 @@ def page(title: str, body: str, script: str = "") -> str:
 
 
 def authed(request: Request) -> bool:
-	return request.cookies.get("sid") == "ok"
+	return request.cookies.get("sid") in SESSIONS
 
 
 def login_form() -> str:
@@ -77,6 +85,7 @@ def index() -> str:
 	<p><a href="#">A link that goes nowhere</a></p>
 	<p><a href="/dead" target="_blank">Open the dead page in a new tab</a></p>
 	<p><a href="/overflow" target="_blank">Open overflow in a new tab</a></p>
+	<p><a href="/late">late render</a> · <a href="/never-ready">never ready</a> · <a href="/flaky">flaky handler</a></p>
 	<ul>
 	  <li>dashboard needs a session</li>
 	  <li>crash throws on load</li>
@@ -96,7 +105,9 @@ def login_page() -> str:
 def login(username: str = Form(...), password: str = Form(...)) -> Response:
 	if username == "admin" and password == "secret":
 		response = RedirectResponse("/dashboard", status_code=303)
-		response.set_cookie("sid", "ok", httponly=True, samesite="lax")
+		sid = uuid.uuid4().hex
+		SESSIONS.add(sid)
+		response.set_cookie("sid", sid, httponly=True, samesite="lax")
 		return response
 	return HTMLResponse(
 		page("Sign in", "<h1>Sign in</h1><p class='error'>Invalid credentials</p>" + login_form()),
@@ -114,6 +125,8 @@ def dashboard(request: Request) -> Response:
 	<p>
 	  <button type="button" id="delete-order">Delete order</button>
 	  <button type="button" id="publish">Publish report</button>
+	  <button type="button" id="signout"
+	          onclick="fetch('/session', {method: 'DELETE'}).then(() => { location.href = '/login'; })">Sign out</button>
 	</p>
 	<form method="post" action="/orders">
 	  <label for="email">Customer email</label>
@@ -126,6 +139,12 @@ def dashboard(request: Request) -> Response:
 	</form>
 	"""
 	return HTMLResponse(page("Dashboard", body))
+
+
+@app.delete("/session")
+def end_session(request: Request) -> Response:
+	SESSIONS.discard(request.cookies.get("sid", ""))
+	return JSONResponse({"ok": True})
 
 
 @app.post("/orders")
@@ -176,7 +195,12 @@ def crash() -> str:
 @app.get("/console", response_class=HTMLResponse)
 def console() -> str:
 	body = "<h1>Console error</h1><p>Nothing visibly wrong here.</p>"
-	script = "<script>console.error('canary: widget failed to load');</script>"
+	if MUTATE["fix_console"] and not MUTATE["plant"]:
+		script = ""
+	elif MUTATE["plant"]:
+		script = "<script>console.error('canary: second widget failed');</script>"
+	else:
+		script = "<script>console.error('canary: widget failed to load');</script>"
 	return page("Console error", body, script)
 
 
@@ -297,3 +321,52 @@ def form_ok() -> str:
 @app.post("/echo")
 def echo(name: str = Form(...), email: str = Form("")) -> Response:
 	return HTMLResponse(page("Received", f"<h1>Received</h1><p>{name} {email}</p>"))
+
+
+@app.get("/_canary/mutate")
+def mutate(plant: int = 0, fix_console: int = 0) -> Response:
+	MUTATE["plant"] = bool(plant)
+	MUTATE["fix_console"] = bool(fix_console)
+	return JSONResponse(MUTATE)
+
+
+@app.get("/late", response_class=HTMLResponse)
+def late() -> str:
+	# The shell paints at once; the real content arrives 1.6s later. A heuristic
+	# that watches the node count settles on the shell and never sees the button.
+	body = """
+	<h1>Late render</h1>
+	<div id="slot"><p>loading…</p></div>
+	"""
+	script = """<script>
+	setTimeout(function () {
+	  document.getElementById('slot').innerHTML =
+	    '<button id="late-dead">Late dead</button><span id="late-ready">ready</span>';
+	}, 1600);
+	</script>"""
+	return page("Late render", body, script)
+
+
+@app.get("/never-ready", response_class=HTMLResponse)
+def never_ready() -> str:
+	return page("Never ready", "<h1>Never ready</h1><p>The readiness marker is never rendered.</p>")
+
+
+FLAKY = {"loads": 0}
+
+
+@app.get("/flaky", response_class=HTMLResponse)
+def flaky() -> Response:
+	# Every second load of this route ships its handlers missing. A probe that
+	# lands on a broken load sees a dead control; the confirming probe is the very
+	# next load and sees a working one. Two buttons guarantee one probe lands on
+	# a broken load whatever the parity of the loads before it.
+	FLAKY["loads"] += 1
+	handler = "" if FLAKY["loads"] % 2 == 0 else " onclick=\"document.getElementById('out').textContent='saved'\""
+	body = f"""
+	<h1>Flaky handler</h1>
+	<button id="flaky-a"{handler}>Flaky save A</button>
+	<button id="flaky-b"{handler}>Flaky save B</button>
+	<p id="out"></p>
+	"""
+	return HTMLResponse(page("Flaky handler", body))
