@@ -13,6 +13,7 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
+	"afford/internal/audit"
 	"afford/internal/config"
 	"afford/internal/discover"
 	"afford/internal/model"
@@ -238,6 +239,7 @@ func NewProbePage(ctx playwright.BrowserContext, cfg config.Config) (playwright.
 		return nil, nil, err
 	}
 	page.SetDefaultTimeout(8000)
+	_ = page.AddInitScript(playwright.Script{Content: playwright.String(audit.InitScript)})
 	collector := &Collector{
 		ignoreConsole:  compileAll(cfg.Policy.IgnoreConsole),
 		ignoreRequests: compileAll(cfg.Policy.IgnoreRequests),

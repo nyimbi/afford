@@ -55,7 +55,9 @@ expected = {
     "E_500_ON_VALID", "E_VALIDATION_NOT_ENFORCED", "E_DEAD_LINK",
     "E_UUID_EXPOSED", "E_UUID_IN_OPTION_VALUE", "E_EMPTY_SELECT",
     "E_DESTRUCTIVE_SKIPPED", "E_NEW_TAB", "E_CLIENT_ERROR_ON_ACTION",
-    "E_NOT_DEEPLINKABLE", "E_NOT_READY",
+    "E_NOT_DEEPLINKABLE", "E_NOT_READY", "E_RENDERED_GARBAGE", "E_BROKEN_IMAGE",
+    "E_UNHANDLED_REJECTION", "E_A11Y_SERIOUS", "E_KEYBOARD_UNREACHABLE",
+    "E_NO_FOCUS_INDICATOR", "E_KEYBOARD_TRAP",
 }
 missing = expected - found
 if missing:
@@ -115,6 +117,18 @@ if not revealed or "Open menu" not in str(revealed[0]["detail"].get("revealed_by
     raise SystemExit("canary: a revealed finding must name the control that revealed it")
 if not any("cross-origin frame" in n for n in payload["summary"]["not_tested"]):
     raise SystemExit("canary: the skipped cross-origin frame was not listed")
+
+leaks = [f["page_url"] for f in payload["findings"] if f["code"] == "E_RENDERED_GARBAGE"]
+if any(u.endswith("/code-sample") for u in leaks):
+    raise SystemExit("canary: undefined/NaN inside code and pre was reported as leaked text")
+if not any(u.endswith("/garbage") for u in leaks):
+    raise SystemExit("canary: leaked text on /garbage was not found")
+traps = [f["page_url"] for f in payload["findings"] if f["code"] == "E_KEYBOARD_TRAP"]
+if not traps or not all(u.endswith("/trap") for u in traps):
+    raise SystemExit(f"canary: keyboard trap must be found on /trap only: {traps}")
+clean = [f for f in payload["findings"] if f["code"].startswith(("E_KEYBOARD", "E_NO_FOCUS")) and f["page_url"].endswith("/dead")]
+if clean:
+    raise SystemExit(f"canary: keyboard findings on a page that tabs cleanly: {[(f['code'], f.get('element')) for f in clean]}")
 
 kinds = {f["detail"].get("kind") for f in payload["findings"]
          if f["code"] == "E_DESTRUCTIVE_SKIPPED"}

@@ -138,6 +138,10 @@ type RunConfig struct {
 	Reveal int `toml:"reveal"`
 	// ScrollSteps bounds scroll-to-load before each scan; 0 turns it off.
 	ScrollSteps int `toml:"scroll_steps"`
+	// A11y runs the bounded axe-core rule set on each page; Keyboard runs the
+	// Tab pass; Text and Images run the rendered-text and broken-image oracles.
+	A11y     bool `toml:"a11y"`
+	Keyboard bool `toml:"keyboard"`
 	// Viewports are extra [width, height] pairs captured after the primary
 	// viewport: screenshot, overflow and visual baseline only, no probing.
 	Viewports [][]int `toml:"viewports"`
@@ -267,7 +271,7 @@ func Default() Config {
 		Run: RunConfig{
 			Out: ".afford", Depth: "standard", Viewport: []int{1280, 900},
 			Browser: "chromium", TimeoutSecs: 900, Confirm: true,
-			Reveal: 4, ScrollSteps: 5,
+			Reveal: 4, ScrollSteps: 5, A11y: true, Keyboard: true,
 		},
 		Scope: ScopeConfig{
 			Include: []string{"/**"},

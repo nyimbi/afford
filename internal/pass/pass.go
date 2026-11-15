@@ -8,6 +8,7 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
+	"afford/internal/audit"
 	"afford/internal/browser"
 	"afford/internal/config"
 	"afford/internal/model"
@@ -75,6 +76,18 @@ func Capture(
 	findings = append(findings, oracles.Unlabeled(visible, pageURL)...)
 	findings = append(findings, oracles.EmptyHref(visible, pageURL)...)
 	findings = append(findings, oracles.OptionsAudit(visible, pageURL)...)
+	findings = append(findings, audit.RenderedText(page, pageURL)...)
+	findings = append(findings, audit.BrokenImages(page, pageURL)...)
+	findings = append(findings, audit.Rejections(page, pageURL)...)
+	if cfg.Run.A11y {
+		if axe, err := audit.Axe(page, pageURL); err == nil {
+			findings = append(findings, axe...)
+		}
+	}
+	if cfg.Run.Keyboard {
+		findings = append(findings, audit.Keyboard(page, pageURL, tabbable(visible))...)
+		_, _ = page.Evaluate("() => { if (document.activeElement) document.activeElement.blur(); window.scrollTo(0, 0); }")
+	}
 	if len(load.NotReady) > 0 {
 		f := model.NewFinding("E_NOT_READY", pageURL)
 		f.Detail["conditions"] = load.NotReady
@@ -171,4 +184,18 @@ func Control(
 func RevealedOf(obs model.Observation) []model.Element {
 	list, _ := obs.Extra["revealed"].([]model.Element)
 	return list
+}
+
+// tabbable are the controls a keyboard user is expected to reach: visible,
+// enabled, not hidden inputs, not inside a frame (Tab order crosses frames
+// differently and is not judged here).
+func tabbable(controls []model.Element) []model.Element {
+	var out []model.Element
+	for _, c := range controls {
+		if c.Disabled || c.Frame != 0 || c.Type == "hidden" || c.Via != nil {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }

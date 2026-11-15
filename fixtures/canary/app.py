@@ -86,7 +86,8 @@ def index() -> str:
 	<p><a href="/dead" target="_blank">Open the dead page in a new tab</a></p>
 	<p><a href="/overflow" target="_blank">Open overflow in a new tab</a></p>
 	<p><a href="/late">late render</a> · <a href="/never-ready">never ready</a> · <a href="/flaky">flaky handler</a>
-	 · <a href="/reveal">reveal</a> · <a href="/shadow">shadow</a> · <a href="/frames">frames</a> · <a href="/lazy">lazy</a></p>
+	 · <a href="/reveal">reveal</a> · <a href="/shadow">shadow</a> · <a href="/frames">frames</a> · <a href="/lazy">lazy</a>
+	 · <a href="/garbage">garbage</a> · <a href="/code-sample">code sample</a> · <a href="/trap">trap</a></p>
 	<ul>
 	  <li>dashboard needs a session</li>
 	  <li>crash throws on load</li>
@@ -442,3 +443,44 @@ def lazy() -> str:
 	});
 	</script>"""
 	return page("Lazy content", body, script)
+
+
+@app.get("/garbage", response_class=HTMLResponse)
+def garbage() -> str:
+	# Five planted page-level defects: leaked undefined, a broken image with no
+	# alt, an unhandled rejection, a clickable div the keyboard cannot reach, and
+	# a button whose focus ring was styled away.
+	body = """
+	<h1>Garbage</h1>
+	<p>Welcome back, undefined. Your balance is NaN.</p>
+	<img src="/missing-image.png" width="40" height="40">
+	<div id="fake" onclick="document.title='x'" style="cursor:pointer;padding:6px;border:1px solid #888;width:120px">Fake button</div>
+	<style>#ring { outline: none; border: 1px solid #888; background: #fff; }
+	#ring:focus, #ring:focus-visible { outline: none; }</style>
+	<button id="ring" type="button" onclick="document.title='y'">No ring</button>
+	"""
+	script = "<script>Promise.reject(new Error('canary rejection'));</script>"
+	return page("Garbage", body, script)
+
+
+@app.get("/code-sample", response_class=HTMLResponse)
+def code_sample() -> str:
+	# Control: the same tokens inside code and pre are documentation, not leakage.
+	body = """
+	<h1>Code sample</h1>
+	<p>Calling <code>fetch()</code> may give <code>undefined</code> or <code>NaN</code>.</p>
+	<pre>const x = undefined; // NaN</pre>
+	"""
+	return page("Code sample", body)
+
+
+@app.get("/trap", response_class=HTMLResponse)
+def trap() -> str:
+	body = """
+	<h1>Trap</h1>
+	<a href="/">before</a>
+	<input id="t" aria-label="Trap field" type="text"
+	       onkeydown="if (event.key === 'Tab') { event.preventDefault(); this.focus(); }">
+	<a href="/dead">after</a>
+	"""
+	return page("Trap", body)

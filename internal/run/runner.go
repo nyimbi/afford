@@ -201,7 +201,12 @@ func (r *Runner) finish() (model.Summary, error) {
 func (r *Runner) newContext() (playwright.BrowserContext, int, error) {
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
-	ctx, err := r.host.NewContext(r.session.StatePath, r.session.Creds, r.session.Headers)
+	headers := map[string]string{}
+	for k, v := range r.session.Headers {
+		headers[k] = v
+	}
+	headers["X-Afford-Run"] = r.runID
+	ctx, err := r.host.NewContext(r.session.StatePath, r.session.Creds, headers)
 	return ctx, r.sessionGen, err
 }
 
