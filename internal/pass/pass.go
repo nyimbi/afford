@@ -102,6 +102,9 @@ func controlFindings(obs model.Observation, url string, el model.Element) []mode
 	fs := oracles.Evaluate(obs, url, "action", &pointedTo)
 	for i := range fs {
 		fs[i].Payload = "effect=" + obs.Effect
+		if el.Via != nil {
+			fs[i].Detail["revealed_by"] = fmt.Sprintf("%s “%s”", el.Via.Tag, el.Via.Name)
+		}
 		if len(fs[i].Evidence) == 0 {
 			fs[i].Evidence = oracles.FallbackEvidence(obs)
 		}
@@ -162,4 +165,10 @@ func Control(
 		}
 	}
 	return obs, fs
+}
+
+// RevealedOf returns the controls a probe found uncovered by its click.
+func RevealedOf(obs model.Observation) []model.Element {
+	list, _ := obs.Extra["revealed"].([]model.Element)
+	return list
 }

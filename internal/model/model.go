@@ -254,6 +254,15 @@ type Element struct {
 	InForm      bool              `json:"in_form"`
 	Src         string            `json:"src"`
 	Attrs       map[string]string `json:"attrs"`
+	// Frame is the index into page.Frames() of the same-origin iframe the
+	// control lives in; 0 is the page itself.
+	Frame int `json:"frame,omitempty"`
+	// InShadow marks a control inside an open shadow root.
+	InShadow bool `json:"in_shadow,omitempty"`
+	// Via is the control that must be activated first to make this one appear
+	// (a menu button, a dialog trigger). Depth is one: a revealed control that
+	// reveals more is not followed.
+	Via *Element `json:"via,omitempty"`
 }
 
 func (e Element) IsTextInput() bool {
@@ -293,6 +302,11 @@ type ScanResult struct {
 	OverflowX     bool       `json:"overflow_x"`
 	ScrollWidth   int        `json:"scroll_width"`
 	ViewportWidth int        `json:"viewport_width"`
+	// Frames counts same-origin child frames scanned; SkippedFrames names the
+	// cross-origin ones, which afford never drives.
+	Frames        int      `json:"frames,omitempty"`
+	SkippedFrames []string `json:"skipped_frames,omitempty"`
+	ShadowHosts   int      `json:"shadow_hosts,omitempty"`
 }
 
 func (s ScanResult) ByIdx(idx int) (Element, bool) {

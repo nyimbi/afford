@@ -302,6 +302,12 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
 		r.bump(r.notTested, "DOM scan failed", 1)
 		return nil
 	}
+	if load.ScrollTruncated {
+		r.bump(r.notTested, "scroll-to-load stopped at its step bound; the page may have more content", 1)
+	}
+	for _, skipped := range scanResult.SkippedFrames {
+		r.bump(r.skipped, "cross-origin frame: "+discover.Template(skipped), 1)
+	}
 	screenshotRel, shotErr := r.shoot(page, url)
 	status := 0
 	if load.OK {
@@ -492,7 +498,8 @@ func (r *Runner) probeControls(
 		}
 	}
 	ordered = append(ordered, guarded...)
-	for _, el := range ordered {
+	for i := 0; i < len(ordered); i++ {
+		el := ordered[i]
 		if attempts >= r.cfg.Limits.MaxControlsPerPage {
 			r.bump(r.notTested, "control budget per page", 1)
 			break
@@ -548,6 +555,10 @@ func (r *Runner) probeControls(
 			r.store.AddFinding(f)
 		}
 		r.popupFindings(url, obs)
+		if revealed := pass.RevealedOf(obs); len(revealed) > 0 {
+			ordered = append(ordered, revealed...)
+			r.bump(r.notTested, "controls revealed by a click (probed at depth 1)", len(revealed))
+		}
 		if obs.Navigated && obs.URLAfter != "" {
 			landed := discover.Normalize(obs.URLAfter)
 			target := discover.Absolute(url, el.Href)

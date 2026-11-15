@@ -99,6 +99,23 @@ totals = payload["summary"]["totals"]
 if payload["summary"].get("unconfirmed", 0) < 1 or totals["major"] <= counts["major"]:
     raise SystemExit(f"canary: unconfirmed findings leaked into the gating counts: {counts} vs {totals}")
 
+dead_names = " ".join(f.get("element") or "" for f in payload["findings"] if f["code"] == "E_DEAD_CONTROL")
+for needle, why in [
+    ("Menu dead item", "a control revealed by a click was not rescanned"),
+    ("Shadow dead", "a control inside an open shadow root was not scanned"),
+    ("Frame dead", "a control inside a same-origin iframe was not scanned"),
+    ("Lazy dead", "scroll-to-load did not reach the lazy content"),
+]:
+    if needle not in dead_names:
+        raise SystemExit(f"canary: {why}")
+if "Foreign dead" in dead_names:
+    raise SystemExit("canary: a cross-origin frame was driven")
+revealed = [f for f in payload["findings"] if "Menu dead item" in (f.get("element") or "")]
+if not revealed or "Open menu" not in str(revealed[0]["detail"].get("revealed_by")):
+    raise SystemExit("canary: a revealed finding must name the control that revealed it")
+if not any("cross-origin frame" in n for n in payload["summary"]["not_tested"]):
+    raise SystemExit("canary: the skipped cross-origin frame was not listed")
+
 kinds = {f["detail"].get("kind") for f in payload["findings"]
          if f["code"] == "E_DESTRUCTIVE_SKIPPED"}
 if not {"delete", "side_effect"} <= kinds:
@@ -265,7 +282,7 @@ PY
 # The production guard: writing to a host outside [safety] mutation_hosts is a
 # configuration error (exit 2) before any browser starts; a read-only run is not.
 set +e
-go run ./cmd/afford run --config fixtures/canary/afford.toml \
+./bin/afford run --config fixtures/canary/afford.toml \
 	--base-url "https://shop.example.com" --no-prompt --quiet --out "$(mktemp -d)" 2>/dev/null
 guarded=$?
 set -e

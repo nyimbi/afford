@@ -28,7 +28,11 @@ type Load struct {
 	LoadMS    int64    // browser loadEventEnd
 	SettledMS int64    // wall clock from navigation to settled
 	NotReady  []string // readiness conditions that never held
-	Err       error
+	// Scrolled counts scroll steps that grew the page; ScrollTruncated means
+	// the step bound ended it while the page was still growing.
+	Scrolled        int
+	ScrollTruncated bool
+	Err             error
 }
 
 const navTimingJS = `() => {
@@ -73,6 +77,7 @@ func Reset(page playwright.Page, cfg config.Config, url string) Load {
 	}
 	notReady := browser.SettleReady(page, cfg)
 	settled := time.Since(started).Milliseconds()
+	scrolled, truncated := browser.ScrollToLoad(page, cfg)
 	status := 0
 	if response != nil {
 		status = response.Status()
@@ -84,6 +89,7 @@ func Reset(page playwright.Page, cfg config.Config, url string) Load {
 	return Load{
 		OK: true, Status: status, FinalURL: page.URL(),
 		LoadMS: loadMS, SettledMS: settled, NotReady: notReady,
+		Scrolled: scrolled, ScrollTruncated: truncated,
 	}
 }
 
@@ -123,7 +129,8 @@ const occludedJS = `
 	const x = r.left + r.width / 2;
 	const y = r.top + r.height / 2;
 	if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return false;
-	const hit = document.elementFromPoint(x, y);
+	const root = el.getRootNode();
+	const hit = (root.elementFromPoint ? root : document).elementFromPoint(x, y);
 	return !(hit && (hit === el || el.contains(hit) || hit.contains(el)));
 }
 `
@@ -136,8 +143,15 @@ func Locate(page playwright.Page, el model.Element) (playwright.Locator, model.S
 		return nil, model.ScanResult{}, false
 	}
 	for _, candidate := range fresh.Controls {
-		if candidate.Fingerprint == el.Fingerprint && candidate.Nth == el.Nth {
+		if candidate.Fingerprint == el.Fingerprint && candidate.Nth == el.Nth && candidate.Frame == el.Frame {
 			selector := fmt.Sprintf(`[data-afford-idx="%d"]`, candidate.Idx)
+			if candidate.Frame > 0 {
+				frames := page.Frames()
+				if candidate.Frame >= len(frames) {
+					return nil, fresh, false
+				}
+				return frames[candidate.Frame].Locator(selector), fresh, true
+			}
 			return page.Locator(selector), fresh, true
 		}
 	}
@@ -202,6 +216,13 @@ func ProbeControl(
 	}
 	// Load-time events are the page's, not the action's: they are reported by the
 	// capture pass, so the action observation starts from this baseline.
+	if el.Via != nil {
+		// A revealed control exists only after its trigger ran; replay it.
+		if vl, _, ok := Locate(page, *el.Via); ok {
+			_, _ = perform(vl, *el.Via, cfg)
+			browser.Settle(page, cfg)
+		}
+	}
 	baseline := collector.SnapshotCopy()
 	beforeURL := page.URL()
 	beforeSig := Signature(page)
@@ -210,55 +231,12 @@ func ProbeControl(
 	actionError := ""
 	obsUploadError := ""
 
-	locator, _, ok := Locate(page, el)
+	locator, pre, ok := Locate(page, el)
 	if !ok {
 		actionError = "element not present after reload"
 	} else {
 		occluded = IsOccluded(locator)
-		kind := payloads.InferKind(el)
-		switch {
-		case el.Type == "file":
-			file, ferr := uploads.Resolve(el, cfg.Uploads)
-			if ferr != nil {
-				obsUploadError = ferr.Error()
-				break
-			}
-			if err := locator.SetInputFiles([]playwright.InputFile{{
-				Name: file.Name, MimeType: file.MimeType, Buffer: file.Buffer,
-			}}); err != nil {
-				obsUploadError = err.Error()
-			}
-		case el.Tag == "select":
-			if value := payloads.ValidValue(el); value != "" {
-				_, err := locator.SelectOption(playwright.SelectOptionValues{Values: &[]string{value}},
-					playwright.LocatorSelectOptionOptions{Timeout: playwright.Float(float64(cfg.Limits.ProbeTimeoutMS))})
-				if err != nil {
-					actionError = err.Error()
-				}
-			}
-		case kind == "checkbox" || kind == "radio":
-			if err := locator.Check(playwright.LocatorCheckOptions{
-				Timeout: playwright.Float(float64(cfg.Limits.ProbeTimeoutMS)),
-			}); err != nil {
-				actionError = err.Error()
-			}
-		case kind == "range":
-			value := payloads.ValidValue(el)
-			if value == "" {
-				value = "1"
-			}
-			if err := locator.Fill(value, playwright.LocatorFillOptions{
-				Timeout: playwright.Float(float64(cfg.Limits.ProbeTimeoutMS)),
-			}); err != nil {
-				actionError = err.Error()
-			}
-		default:
-			if err := locator.Click(playwright.LocatorClickOptions{
-				Timeout: playwright.Float(float64(cfg.Limits.ProbeTimeoutMS)),
-			}); err != nil {
-				actionError = err.Error()
-			}
-		}
+		actionError, obsUploadError = perform(locator, el, cfg)
 		browser.Settle(page, cfg)
 	}
 
@@ -295,6 +273,11 @@ func ProbeControl(
 	if obsUploadError != "" {
 		obs.Extra["upload_error"] = obsUploadError
 	}
+	if el.Via == nil && ok && cfg.Run.Reveal > 0 && !obs.Navigated && popups == 0 {
+		if revealed := Revealed(page, pre, el, cfg.Run.Reveal); len(revealed) > 0 {
+			obs.Extra["revealed"] = revealed
+		}
+	}
 	if cfg.Popups.Mode == "capture" && len(extras) > 0 {
 		obs.PopupResults = capturePopups(extras, cfg, popupShotDir)
 	}
@@ -320,6 +303,57 @@ func ProbeControl(
 }
 
 // asInt64 accepts the numeric shapes the Playwright decoder can hand back.
+// perform applies the action a control's kind calls for: attach a file, choose
+// an option, tick a box, or click. It returns the action error and the upload
+// error separately because they mean different things to the oracles.
+func perform(locator playwright.Locator, el model.Element, cfg config.Config) (actionError, obsUploadError string) {
+	kind := payloads.InferKind(el)
+	switch {
+	case el.Type == "file":
+		file, ferr := uploads.Resolve(el, cfg.Uploads)
+		if ferr != nil {
+			obsUploadError = ferr.Error()
+			break
+		}
+		if err := locator.SetInputFiles([]playwright.InputFile{{
+			Name: file.Name, MimeType: file.MimeType, Buffer: file.Buffer,
+		}}); err != nil {
+			obsUploadError = err.Error()
+		}
+	case el.Tag == "select":
+		if value := payloads.ValidValue(el); value != "" {
+			_, err := locator.SelectOption(playwright.SelectOptionValues{Values: &[]string{value}},
+				playwright.LocatorSelectOptionOptions{Timeout: playwright.Float(float64(cfg.Limits.ProbeTimeoutMS))})
+			if err != nil {
+				actionError = err.Error()
+			}
+		}
+	case kind == "checkbox" || kind == "radio":
+		if err := locator.Check(playwright.LocatorCheckOptions{
+			Timeout: playwright.Float(float64(cfg.Limits.ProbeTimeoutMS)),
+		}); err != nil {
+			actionError = err.Error()
+		}
+	case kind == "range":
+		value := payloads.ValidValue(el)
+		if value == "" {
+			value = "1"
+		}
+		if err := locator.Fill(value, playwright.LocatorFillOptions{
+			Timeout: playwright.Float(float64(cfg.Limits.ProbeTimeoutMS)),
+		}); err != nil {
+			actionError = err.Error()
+		}
+	default:
+		if err := locator.Click(playwright.LocatorClickOptions{
+			Timeout: playwright.Float(float64(cfg.Limits.ProbeTimeoutMS)),
+		}); err != nil {
+			actionError = err.Error()
+		}
+	}
+	return actionError, obsUploadError
+}
+
 func asInt64(v any) int64 {
 	switch n := v.(type) {
 	case float64:
@@ -691,4 +725,41 @@ func ProbeForm(
 		}
 	}
 	return obs, meta
+}
+
+// Revealed rescans after an action and returns the visible, enabled controls
+// that were not there before: the items of a menu, the buttons of a dialog.
+// Each is stamped with its trigger so a later probe can replay the reveal.
+func Revealed(page playwright.Page, before model.ScanResult, trigger model.Element, limit int) []model.Element {
+	after, err := discover.Scan(page)
+	if err != nil {
+		return nil
+	}
+	known := map[string]bool{}
+	for _, c := range before.Controls {
+		// A control that existed but was hidden is the usual case: a menu that
+		// toggles `hidden` is revealed, not added.
+		if c.Visible {
+			known[revealKey(c)] = true
+		}
+	}
+	via := trigger
+	via.Via = nil
+	var out []model.Element
+	for _, c := range after.Controls {
+		if known[revealKey(c)] || !c.Visible || c.Disabled || c.IsSubmit() ||
+			(c.ID != "" && c.ID == trigger.ID) {
+			continue
+		}
+		c.Via = &via
+		out = append(out, c)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func revealKey(c model.Element) string {
+	return fmt.Sprintf("%s|%d|%d", c.Fingerprint, c.Nth, c.Frame)
 }

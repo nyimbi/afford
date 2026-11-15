@@ -83,3 +83,22 @@ func TestIsLoginURL(t *testing.T) {
 		}
 	}
 }
+
+func TestSameOrigin(t *testing.T) {
+	cases := []struct {
+		page, frame string
+		want        bool
+	}{
+		{"http://a.test/x", "http://a.test/widget", true},
+		{"http://a.test/x", "about:blank", true},
+		{"http://a.test/x", "", true},
+		{"http://a.test/x", "https://a.test/widget", false},
+		{"http://a.test:3000/x", "http://a.test:4000/y", false},
+		{"http://a.test/x", "https://pay.example.com/f", false},
+	}
+	for _, c := range cases {
+		if got := sameOrigin(c.page, c.frame); got != c.want {
+			t.Errorf("sameOrigin(%q, %q) = %v, want %v", c.page, c.frame, got, c.want)
+		}
+	}
+}

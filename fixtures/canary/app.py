@@ -85,7 +85,8 @@ def index() -> str:
 	<p><a href="#">A link that goes nowhere</a></p>
 	<p><a href="/dead" target="_blank">Open the dead page in a new tab</a></p>
 	<p><a href="/overflow" target="_blank">Open overflow in a new tab</a></p>
-	<p><a href="/late">late render</a> · <a href="/never-ready">never ready</a> · <a href="/flaky">flaky handler</a></p>
+	<p><a href="/late">late render</a> · <a href="/never-ready">never ready</a> · <a href="/flaky">flaky handler</a>
+	 · <a href="/reveal">reveal</a> · <a href="/shadow">shadow</a> · <a href="/frames">frames</a> · <a href="/lazy">lazy</a></p>
 	<ul>
 	  <li>dashboard needs a session</li>
 	  <li>crash throws on load</li>
@@ -370,3 +371,74 @@ def flaky() -> Response:
 	<p id="out"></p>
 	"""
 	return HTMLResponse(page("Flaky handler", body))
+
+
+@app.get("/reveal", response_class=HTMLResponse)
+def reveal() -> str:
+	# The dead item exists only after the menu opens, so a scan of the loaded
+	# page cannot see it.
+	body = """
+	<h1>Reveal</h1>
+	<button id="menu" onclick="document.getElementById('m').hidden = false">Open menu</button>
+	<div id="m" hidden><button id="menu-dead">Menu dead item</button></div>
+	"""
+	return page("Reveal", body)
+
+
+@app.get("/shadow", response_class=HTMLResponse)
+def shadow() -> str:
+	body = """
+	<h1>Shadow DOM</h1>
+	<x-card></x-card>
+	"""
+	script = """<script>
+	customElements.define('x-card', class extends HTMLElement {
+	  connectedCallback() {
+	    const root = this.attachShadow({mode: 'open'});
+	    root.innerHTML = '<button id="sh">Shadow dead</button>';
+	  }
+	});
+	</script>"""
+	return page("Shadow DOM", body, script)
+
+
+@app.get("/frames", response_class=HTMLResponse)
+def frames() -> str:
+	# A same-origin frame holds a dead button afford must reach. The foreign
+	# frame is another origin (localhost, not 127.0.0.1) and must stay untouched.
+	body = """
+	<h1>Frames</h1>
+	<iframe id="inner" src="/frame-inner" width="400" height="120"></iframe>
+	<iframe id="foreign" src="http://localhost:8099/frame-foreign" width="400" height="120"></iframe>
+	"""
+	return page("Frames", body)
+
+
+@app.get("/frame-inner", response_class=HTMLResponse)
+def frame_inner() -> str:
+	return "<!doctype html><html><body><button id='fd'>Frame dead</button></body></html>"
+
+
+@app.get("/frame-foreign", response_class=HTMLResponse)
+def frame_foreign() -> str:
+	return "<!doctype html><html><body><button id='ff'>Foreign dead</button></body></html>"
+
+
+@app.get("/lazy", response_class=HTMLResponse)
+def lazy() -> str:
+	# The button is appended only when the viewer scrolls to the bottom.
+	body = """
+	<h1>Lazy content</h1>
+	<div style="height:3200px;background:linear-gradient(#fff,#ddd)">tall</div>
+	<div id="tail"></div>
+	"""
+	script = """<script>
+	let done = false;
+	window.addEventListener('scroll', function () {
+	  if (!done && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 40) {
+	    done = true;
+	    document.getElementById('tail').innerHTML = '<button id="lz">Lazy dead</button>';
+	  }
+	});
+	</script>"""
+	return page("Lazy content", body, script)

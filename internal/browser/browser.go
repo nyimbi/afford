@@ -361,3 +361,49 @@ func Screenshot(page playwright.Page, path string, masks []string) (string, erro
 	}
 	return path, nil
 }
+
+// ScrollToLoad scrolls to the bottom in bounded steps so lazy-loaded and
+// infinite-scroll content exists before the scan, then returns to the top. It
+// stops as soon as the page stops growing. It reports how many steps grew the
+// page and whether the bound cut it off (an unbounded feed never settles).
+func ScrollToLoad(page playwright.Page, cfg config.Config) (grew int, truncated bool) {
+	steps := cfg.Run.ScrollSteps
+	if steps <= 0 {
+		return 0, false
+	}
+	height := func() float64 {
+		raw, err := page.Evaluate("() => Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)")
+		if err != nil {
+			return 0
+		}
+		switch v := raw.(type) {
+		case float64:
+			return v
+		case int:
+			return float64(v)
+		}
+		return 0
+	}
+	prev := height()
+	for i := 0; i < steps; i++ {
+		if _, err := page.Evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)"); err != nil {
+			return grew, false
+		}
+		page.WaitForTimeout(250)
+		_ = page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+			State:   playwright.LoadStateNetworkidle,
+			Timeout: playwright.Float(math.Min(1500, float64(cfg.Limits.SettleMS))),
+		})
+		h := height()
+		if h <= prev+1 {
+			break
+		}
+		grew++
+		prev = h
+		if i == steps-1 {
+			truncated = true
+		}
+	}
+	_, _ = page.Evaluate("() => window.scrollTo(0, 0)")
+	return grew, truncated
+}

@@ -311,7 +311,9 @@ func (c *Checker) probeControls(
 ) {
 	probed, offScope := 0, 0
 	destructive := map[string]int{}
-	for _, el := range scanResult.Controls {
+	queue := append([]model.Element(nil), scanResult.Controls...)
+	for i := 0; i < len(queue); i++ {
+		el := queue[i]
 		if probed >= opts.MaxControls {
 			result.Notes = append(result.Notes, fmt.Sprintf("control budget reached at %d", probed))
 			break
@@ -347,6 +349,7 @@ func (c *Checker) probeControls(
 			add(f)
 		}
 		add(c.popupFindings(rawURL, obs)...)
+		queue = append(queue, pass.RevealedOf(obs)...)
 	}
 	result.ControlsProbed = probed
 	for kind, n := range destructive {

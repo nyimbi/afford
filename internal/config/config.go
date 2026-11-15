@@ -133,6 +133,14 @@ type RunConfig struct {
 	// fresh load; a finding that does not reproduce is reported as unconfirmed
 	// and does not fail the gate.
 	Confirm bool `toml:"confirm"`
+	// Reveal is how many newly visible controls a single click may add to the
+	// probe queue (menu items, dialog buttons). 0 turns the rescan off.
+	Reveal int `toml:"reveal"`
+	// ScrollSteps bounds scroll-to-load before each scan; 0 turns it off.
+	ScrollSteps int `toml:"scroll_steps"`
+	// Viewports are extra [width, height] pairs captured after the primary
+	// viewport: screenshot, overflow and visual baseline only, no probing.
+	Viewports [][]int `toml:"viewports"`
 }
 
 type ScopeConfig struct {
@@ -259,6 +267,7 @@ func Default() Config {
 		Run: RunConfig{
 			Out: ".afford", Depth: "standard", Viewport: []int{1280, 900},
 			Browser: "chromium", TimeoutSecs: 900, Confirm: true,
+			Reveal: 4, ScrollSteps: 5,
 		},
 		Scope: ScopeConfig{
 			Include: []string{"/**"},
