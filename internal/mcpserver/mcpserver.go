@@ -285,13 +285,32 @@ func hasSerious(counts map[model.Severity]int) bool {
 	return counts[model.Blocker]+counts[model.Critical]+counts[model.Major] > 0
 }
 
+// firstEvidence gives the digest one actionable line per finding. Probe-derived
+// findings have evidence; inventory and policy findings carry their facts in
+// detail, so fall back to the field an operator would act on.
 func firstEvidence(f model.Finding) string {
-	if len(f.Evidence) == 0 {
-		return ""
+	if len(f.Evidence) > 0 {
+		return clipEvidence(strings.TrimSpace(f.Evidence[0]))
 	}
-	line := strings.TrimSpace(f.Evidence[0])
+	if kind, ok := f.Detail["kind"]; ok {
+		if flag, ok := f.Detail["required_flag"]; ok {
+			return clipEvidence(fmt.Sprintf("kind=%v, needs %v", kind, flag))
+		}
+	}
+	for _, key := range []string{
+		"reason", "error", "popup_url", "href", "redirected_to", "landed",
+		"options", "first_option", "action", "pct", "form", "name", "popups", "disposition",
+	} {
+		if value, ok := f.Detail[key]; ok && value != nil {
+			return clipEvidence(fmt.Sprintf("%s: %v", key, value))
+		}
+	}
+	return ""
+}
+
+func clipEvidence(line string) string {
 	if len(line) > 150 {
-		line = line[:149] + "…"
+		return line[:149] + "…"
 	}
 	return line
 }

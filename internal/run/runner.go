@@ -74,14 +74,17 @@ type Runner struct {
 	notTested      map[string]int
 	skipped        map[string]int
 	started        time.Time
+	visitPage      func(playwright.BrowserContext, Item) []found
 }
 
 func New(cfg config.Config, st *store.Store, runID, baseDir string, ctx context.Context) *Runner {
-	return &Runner{
+	runner := &Runner{
 		cfg: cfg, store: st, runID: runID, baseDir: baseDir, ctx: ctx,
 		seen: map[string]bool{}, templateCounts: map[string]int{},
 		notTested: map[string]int{}, skipped: map[string]int{},
 	}
+	runner.visitPage = runner.visit
+	return runner
 }
 
 func (r *Runner) bump(bucket map[string]int, reason string, n int) {
@@ -161,19 +164,7 @@ func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary,
 				defer wg.Done()
 				ctx := <-pool
 				defer func() { pool <- ctx }()
-				var urls []found
-				func() {
-					defer func() {
-						if rec := recover(); rec != nil {
-							f := model.NewFinding("E_HARNESS_TIMEOUT", it.URL)
-							f.Detail["error"] = fmt.Sprint(rec)
-							f.Evidence = []string{"panic during page visit: " + fmt.Sprint(rec)}
-							r.store.AddFinding(f)
-						}
-					}()
-					urls = r.visit(ctx, it)
-				}()
-				discovered <- urls
+				discovered <- r.visitSafely(ctx, it)
 			}(item)
 		}
 		wg.Wait()
@@ -347,6 +338,21 @@ func (r *Runner) emit(pageURL, kind, payload string, obs model.Observation, cont
 		}
 		r.store.AddFinding(f)
 	}
+}
+
+// visitSafely contains a panic to one page. A panic in the probe path is a bug
+// in the tool, not in the application, so it is recorded as a harness finding and
+// the crawl continues.
+func (r *Runner) visitSafely(ctx playwright.BrowserContext, item Item) (urls []found) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			f := model.NewFinding("E_HARNESS_TIMEOUT", item.URL)
+			f.Detail["error"] = fmt.Sprint(rec)
+			f.Evidence = []string{"panic during page visit: " + fmt.Sprint(rec)}
+			r.store.AddFinding(f)
+		}
+	}()
+	return r.visitPage(ctx, item)
 }
 
 // auditLinks records every link the crawler will not follow, with the reason.
