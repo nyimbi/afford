@@ -256,7 +256,7 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
 			"auth_redirect":     authRedirect,
 		},
 	}
-	r.emit(url, "capture", obs, "capture", nil)
+	r.emit(url, "capture", "", obs, "capture", nil)
 	for _, f := range append(oracles.Unlabeled(visible, url), oracles.EmptyHref(visible, url)...) {
 		r.store.AddFinding(f)
 	}
@@ -316,7 +316,7 @@ func (r *Runner) shoot(page playwright.Page, url string) (string, error) {
 	return relative, nil
 }
 
-func (r *Runner) emit(pageURL, kind string, obs model.Observation, contextKind string, el *model.Element) {
+func (r *Runner) emit(pageURL, kind, payload string, obs model.Observation, contextKind string, el *model.Element) {
 	if os.Getenv("AFFORD_DEBUG") != "" {
 		element := ""
 		if el != nil {
@@ -328,7 +328,10 @@ func (r *Runner) emit(pageURL, kind string, obs model.Observation, contextKind s
 	r.store.AddProbe(pageURL)
 	for _, f := range oracles.Evaluate(obs, pageURL, contextKind, el) {
 		if len(f.Evidence) == 0 {
-			f.Evidence = fallbackEvidence(obs)
+			f.Evidence = oracles.FallbackEvidence(obs)
+		}
+		if f.Payload == "" {
+			f.Payload = payload
 		}
 		r.store.AddFinding(f)
 	}
@@ -425,7 +428,7 @@ func (r *Runner) probeControls(
 		r.mu.Unlock()
 		obs := probe.ProbeControl(bctx, page, collector, r.cfg, url, el, filepath.Join(r.baseDir, "popups"))
 		pointedTo := el
-		r.emit(url, "control", obs, "action", &pointedTo)
+		r.emit(url, "control", "effect="+obs.Effect, obs, "action", &pointedTo)
 		if obs.Popups > 0 {
 			f := model.NewFinding("E_NEW_TAB", url)
 			f.Element = fmt.Sprintf("%s “%s”", el.Tag, el.Name)
@@ -554,7 +557,8 @@ func (r *Runner) sweep(page playwright.Page, collector *browser.Collector, url s
 	for _, anomaly := range result.Anomalies {
 		el := anomaly.Element
 		payload := fmt.Sprintf("%s ← %s", el.Name, anomaly.Label)
-		r.emit(url, "validate", anomaly.Obs, "validate", &el)
+		value, _ := anomaly.Obs.Extra["payload"].(string)
+		r.emit(url, "validate", fmt.Sprintf("%s=%q", anomaly.Label, value), anomaly.Obs, "validate", &el)
 		_ = payload
 	}
 }
@@ -609,11 +613,12 @@ func (r *Runner) probeForms(page playwright.Page, collector *browser.Collector, 
 		}
 		for _, mode := range modes {
 			obs, meta := probe.ProbeForm(page, collector, r.cfg, url, form, controls, mode)
-			r.emit(url, "form", obs, "form", nil)
+			r.emit(url, "form", "submit="+mode, obs, "form", nil)
 			for _, f := range probe.FormFindings(obs, meta, url) {
 				if len(f.Evidence) == 0 {
-					f.Evidence = fallbackEvidence(obs)
+					f.Evidence = oracles.FallbackEvidence(obs)
 				}
+				f.Payload = "submit=" + mode
 				r.store.AddFinding(f)
 			}
 		}
@@ -658,33 +663,6 @@ func (r *Runner) summary() model.Summary {
 		ControlsSkipped: r.stats.controlsSkipped,
 		FormsTotal:      r.stats.formsTotal, FormsProbed: r.stats.formsProbed,
 		InputsSwept: r.stats.inputsSwept, PayloadsSent: r.stats.payloadsSent,
-		Counts: counts, NotTested: notTested,
+		Counts: counts, NotTested: notTested, VisualEnabled: r.cfg.Visual.Enabled,
 	}
-}
-
-func fallbackEvidence(obs model.Observation) []string {
-	lines := []string{
-		"effect=" + obs.Effect,
-		fmt.Sprintf("status=%d", obs.Status),
-		"url=" + obs.URLAfter,
-	}
-	for i, e := range obs.PageErrors {
-		if i >= 3 {
-			break
-		}
-		lines = append(lines, "pageerror: "+e)
-	}
-	for i, e := range obs.ConsoleErrors {
-		if i >= 3 {
-			break
-		}
-		lines = append(lines, "console: "+e)
-	}
-	for i, rec := range obs.ErrorRequests() {
-		if i >= 3 {
-			break
-		}
-		lines = append(lines, fmt.Sprintf("HTTP %d: %s %s", rec.Status, rec.Method, rec.URL))
-	}
-	return lines
 }

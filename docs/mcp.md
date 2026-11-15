@@ -23,8 +23,11 @@ never from tool arguments (those land in the host's transcript).
 `no_screenshot`, `max_controls`. `crawl_site`: `max_pages` (default 25), `max_depth`
 (default 2), `depth`, `submit`.
 
-Every result carries `structuredContent` (findings, counts, probe counts, `load_ms`,
-`settled_ms`, screenshot path) and a short text digest an agent can read directly.
+Every result carries `structuredContent` (findings sorted worst-first, counts, probe
+counts, `load_ms`, `settled_ms`, screenshot path) and a short text digest an agent can
+read directly. Each digest line includes the element and the first evidence line —
+`HTTP 500: POST /orders`, not just the finding's title. `crawl_site` also returns
+`skipped_links` (capped at 50), `link_counts`, and the five slowest pages.
 `load_ms` is the browser's load event; `settled_ms` is when the page stopped changing
 under afford's quiet-network and quiet-DOM criteria.
 

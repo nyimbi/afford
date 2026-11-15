@@ -47,9 +47,15 @@ quiet-DOM criteria are met.
 With `--visual`, each page's screenshot is compared against a baseline keyed by route
 template and viewport. See [Visual regression](#visual-regression).
 
-`report.html` opens with a filterable page table — thumbnail, status, load, settled,
-controls, probes, findings — followed by the findings with their evidence. `afford
-checks` prints every check the tool performs.
+`report.html` leads with severity counts and, past eight findings, a **Start here**
+list of the three worst with their first piece of evidence. Then the findings table:
+severity, code, what it means, the page, the control, and the payload or effect that
+produced it. Expanding a row shows *why* the check matters, the console/HTTP evidence,
+the structured detail, every other page carrying the same defect, and a popup
+screenshot where one exists. Below that: a filterable page table (thumbnail, status,
+load, settled, controls, probes, findings — clicking a count filters the findings),
+visual diffs side by side, **Links not crawled** with reasons, and an explicit list of
+what was not tested. `afford checks` prints every check the tool performs.
 
 It does not prove business rules are correct. It proves the affordances it could
 reach did not crash, fail, or go inert, and it prints what it did not test.

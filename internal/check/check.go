@@ -261,6 +261,7 @@ func (c *Checker) Check(ctx context.Context, rawURL string, opts Options) (Resul
 	}
 	if opts.ReadOnly || result.AuthRedirect {
 		result.Notes = append(result.Notes, readOnlyNote(opts, result.AuthRedirect))
+		model.SortFindings(result.Findings)
 		result.DurationMS = time.Since(started).Milliseconds()
 		return result, nil
 	}
@@ -269,6 +270,7 @@ func (c *Checker) Check(ctx context.Context, rawURL string, opts Options) (Resul
 	c.sweep(page, collector, cfg, rawURL, scanResult, &result, add)
 	c.probeForms(page, collector, cfg, rawURL, scanResult, opts, &result, add)
 
+	model.SortFindings(result.Findings)
 	result.DurationMS = time.Since(started).Milliseconds()
 	return result, nil
 }
@@ -343,7 +345,14 @@ func (c *Checker) probeControls(
 		obs := probe.ProbeControl(bctx, page, collector, cfg, rawURL, el,
 			filepath.Join(cfg.Run.Out, "mcp", "popups"))
 		pointedTo := el
-		add(oracles.Evaluate(obs, rawURL, "action", &pointedTo)...)
+		controlFindings := oracles.Evaluate(obs, rawURL, "action", &pointedTo)
+		for i := range controlFindings {
+			controlFindings[i].Payload = "effect=" + obs.Effect
+			if len(controlFindings[i].Evidence) == 0 {
+				controlFindings[i].Evidence = oracles.FallbackEvidence(obs)
+			}
+		}
+		add(controlFindings...)
 		if obs.Popups > 0 {
 			f := model.NewFinding("E_NEW_TAB", rawURL)
 			f.Element = fmt.Sprintf("%s “%s”", el.Tag, el.Name)
@@ -426,7 +435,15 @@ func (c *Checker) sweep(
 	result.PayloadsSent = swept.Payloads
 	for _, anomaly := range swept.Anomalies {
 		el := anomaly.Element
-		add(oracles.Evaluate(anomaly.Obs, rawURL, "validate", &el)...)
+		value, _ := anomaly.Obs.Extra["payload"].(string)
+		findings := oracles.Evaluate(anomaly.Obs, rawURL, "validate", &el)
+		for i := range findings {
+			findings[i].Payload = fmt.Sprintf("%s=%q", anomaly.Label, value)
+			if len(findings[i].Evidence) == 0 {
+				findings[i].Evidence = oracles.FallbackEvidence(anomaly.Obs)
+			}
+		}
+		add(findings...)
 	}
 }
 
@@ -483,8 +500,15 @@ func (c *Checker) probeForms(
 		result.FormsProbed++
 		for _, mode := range modes {
 			obs, meta := probe.ProbeForm(page, collector, cfg, rawURL, form, controls, mode)
-			add(oracles.Evaluate(obs, rawURL, "form", nil)...)
-			add(probe.FormFindings(obs, meta, rawURL)...)
+			formFindings := oracles.Evaluate(obs, rawURL, "form", nil)
+			formFindings = append(formFindings, probe.FormFindings(obs, meta, rawURL)...)
+			for i := range formFindings {
+				formFindings[i].Payload = "submit=" + mode
+				if len(formFindings[i].Evidence) == 0 {
+					formFindings[i].Evidence = oracles.FallbackEvidence(obs)
+				}
+			}
+			add(formFindings...)
 		}
 	}
 }

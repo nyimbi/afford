@@ -26,15 +26,7 @@ type Payload struct {
 
 func Write(st *store.Store, runID, baseDir string, summary model.Summary, embed bool) (string, error) {
 	pages, findings := st.Snapshot()
-	sort.SliceStable(findings, func(i, j int) bool {
-		if findings[i].Rank() != findings[j].Rank() {
-			return findings[i].Rank() < findings[j].Rank()
-		}
-		if findings[i].PageURL != findings[j].PageURL {
-			return findings[i].PageURL < findings[j].PageURL
-		}
-		return findings[i].Code < findings[j].Code
-	})
+	model.SortFindings(findings)
 	payload := Payload{Summary: summary, Pages: pages, Findings: findings, Links: st.LinkRecords()}
 
 	blob, err := json.MarshalIndent(payload, "", "  ")
@@ -118,6 +110,10 @@ td.bad{color:var(--critical);font-weight:650}
 .trio img{width:100%;border:1px solid var(--line);border-radius:6px;background:var(--chip)}
 .trio figcaption{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
 @media (max-width:720px){.trio{grid-template-columns:1fr}}
+a.shot img{width:120px;border:1px solid var(--line);border-radius:6px;margin-top:8px;display:block}
+.start{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 18px 14px}
+.start ol{margin:6px 0 0;padding-left:20px}
+.start li{margin:6px 0;font-size:13.5px}
 .limits{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 18px}
 .limits li{color:var(--muted);font-size:13.5px;margin:3px 0}
 `
@@ -143,6 +139,14 @@ function applyPages() {
 	});
 }
 pq.addEventListener('input', applyPages);
+document.querySelectorAll('a.filter-page').forEach(function (link) {
+	link.addEventListener('click', function (event) {
+		event.preventDefault();
+		q.value = link.dataset.url;
+		q.dispatchEvent(new Event('input'));
+		q.scrollIntoView({behavior: 'smooth', block: 'center'});
+	});
+});
 `
 
 func buildHTML(p Payload, baseDir string, embed bool) string {
@@ -200,12 +204,12 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	cover := [][2]string{
 		{"Pages visited", fmt.Sprint(p.Summary.PagesVisited)},
 		{"Screenshots", fmt.Sprintf("%d/%d", shotCount, len(p.Pages))},
-		{"Controls probed", fmt.Sprintf("%d/%d", p.Summary.ControlsProbed, p.Summary.ControlsTotal)},
+		{"Controls", fmt.Sprintf("%d/%d", p.Summary.ControlsProbed, p.Summary.ControlsTotal)},
 		{"Forms", fmt.Sprintf("%d/%d", p.Summary.FormsProbed, p.Summary.FormsTotal)},
-		{"Inputs swept", fmt.Sprint(p.Summary.InputsSwept)},
-		{"Payloads sent", fmt.Sprint(p.Summary.PayloadsSent)},
+		{"Inputs", fmt.Sprint(p.Summary.InputsSwept)},
+		{"Payloads", fmt.Sprint(p.Summary.PayloadsSent)},
 		{"Links skipped", fmt.Sprint(len(p.Links))},
-		{"Visual diffs", fmt.Sprint(len(visualDiffs))},
+		{"Visual diffs", visualLabel(p.Summary.VisualEnabled, len(visualDiffs))},
 		{"Load p50 / p95", fmt.Sprintf("%d / %d ms", percentile(loads, 50), percentile(loads, 95))},
 		{"Settled p50 / p95", fmt.Sprintf("%d / %d ms", percentile(settled, 50), percentile(settled, 95))},
 	}
@@ -214,6 +218,18 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	}
 	b.WriteString("</div>")
 
+	if len(p.Findings) > 8 {
+		b.WriteString("<div class='start'><h2>Start here</h2><ol>")
+		for _, f := range p.Findings[:3] {
+			fmt.Fprintf(&b, "<li><code>%s</code> %s — <a href='%s'>%s</a>",
+				esc(f.Code), esc(f.Title), esc(f.PageURL), esc(f.PageURL))
+			if first := firstEvidence(f); first != "" {
+				fmt.Fprintf(&b, "<div class='meta'>%s</div>", esc(first))
+			}
+			b.WriteString("</li>")
+		}
+		b.WriteString("</ol></div>")
+	}
 	b.WriteString("<h2>Findings</h2><div class='toolbar'>")
 	b.WriteString("<input id='q' type='search' placeholder='filter by page, code, control…'>")
 	b.WriteString("<select id='sev'><option value=''>all severities</option>")
@@ -239,15 +255,25 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 		fmt.Fprintf(&b, "<td><a href='%s'>%s</a></td>", esc(f.PageURL), esc(f.PageURL))
 		fmt.Fprintf(&b, "<td>%s</td>", esc(f.Element))
 		fmt.Fprintf(&b, "<td><code>%s</code>", esc(f.Payload))
-		if len(f.Evidence) > 0 || len(f.Detail) > 0 {
-			blob, _ := json.MarshalIndent(f.Detail, "", "  ")
+		if f.Why != "" || len(f.Evidence) > 0 || len(f.Detail) > 0 || len(f.AlsoOn) > 0 {
 			b.WriteString("<details><summary>evidence</summary><pre>")
-			b.WriteString(esc(strings.Join(f.Evidence, "\n")))
-			if len(blob) > 2 {
-				b.WriteString("\n\n")
-				b.WriteString(esc(string(blob)))
+			if f.Why != "" {
+				b.WriteString("why: " + esc(f.Why))
+			}
+			if len(f.Evidence) > 0 {
+				b.WriteString("\n\n" + esc(strings.Join(f.Evidence, "\n")))
+			}
+			if formatted := formatDetail(f.Detail); formatted != "" {
+				b.WriteString("\n\n" + esc(formatted))
+			}
+			if len(f.AlsoOn) > 0 {
+				b.WriteString("\n\nalso on:\n" + esc(strings.Join(f.AlsoOn, "\n")))
 			}
 			b.WriteString("</pre></details>")
+			if shot, _ := f.Detail["screenshot"].(string); shot != "" {
+				fmt.Fprintf(&b, "<a class='shot' href='%s'><img loading='lazy' src='%s' alt='popup screenshot'></a>",
+					esc(shot), esc(shot))
+			}
 		}
 		b.WriteString("</td></tr>")
 	}
@@ -309,7 +335,11 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 		fmt.Fprintf(&b, "<td>%s</td>", loadLabel(page.SettledMS))
 		fmt.Fprintf(&b, "<td>%d</td>", page.Controls)
 		fmt.Fprintf(&b, "<td>%d</td>", page.Probes)
-		fmt.Fprintf(&b, "<td><span class='dot %s'></span>%d</td>", worstSeverity(items), len(items))
+		worst := worstSeverity(items)
+		fmt.Fprintf(&b, "<td><span class='dot %s' title='%d finding(s), worst %s'></span>",
+			worst, len(items), dotLabel(worst))
+		fmt.Fprintf(&b, "<a class='filter-page' href='#' data-url='%s' title='show these findings'>%d</a></td>",
+			esc(page.URL), len(items))
 		b.WriteString("</tr>")
 	}
 	b.WriteString("</tbody></table>")
@@ -350,7 +380,21 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	if len(p.Links) == 0 {
 		b.WriteString("<p class='meta'>every link the crawler saw was followed</p>")
 	} else {
-		b.WriteString("<p class='meta'>Recorded so the scope is visible: these links were seen and deliberately not followed.</p>")
+		counts := map[string]int{}
+		for _, link := range p.Links {
+			counts[link.Disposition]++
+		}
+		keys := make([]string, 0, len(counts))
+		for k := range counts {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s %d", k, counts[k]))
+		}
+		fmt.Fprintf(&b, "<p class='meta'>%d link(s) seen and deliberately not followed: %s.</p>",
+			len(p.Links), strings.Join(parts, ", "))
 		b.WriteString("<table><thead><tr><th>Disposition</th><th>Link</th><th>Found on</th><th>Reason</th></tr></thead><tbody>")
 		shown := 0
 		for _, link := range p.Links {
@@ -383,6 +427,65 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	b.WriteString("<li>Destructive controls and form submissions disabled by configuration were not exercised.</li>")
 	b.WriteString("</ul></div>")
 	fmt.Fprintf(&b, "<script>%s</script></main></body></html>", filterJS)
+	return b.String()
+}
+
+func countCode(findings []model.Finding, code string) int {
+	n := 0
+	for _, f := range findings {
+		if f.Code == code {
+			n++
+		}
+	}
+	return n
+}
+
+func visualLabel(enabled bool, diffs int) string {
+	if !enabled {
+		return "off"
+	}
+	return fmt.Sprint(diffs)
+}
+
+func dotLabel(severity string) string {
+	if severity == "" {
+		return "none"
+	}
+	return severity
+}
+
+func firstEvidence(f model.Finding) string {
+	if len(f.Evidence) > 0 {
+		return truncateText(f.Evidence[0], 160)
+	}
+	return ""
+}
+
+func truncateText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
+}
+
+// formatDetail renders the finding's structured detail as readable lines instead
+// of a JSON blob; a human adjudicating a finding should not parse braces.
+func formatDetail(detail map[string]any) string {
+	if len(detail) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(detail))
+	for key := range detail {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for i, key := range keys {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(key + ": " + fmt.Sprint(detail[key]))
+	}
 	return b.String()
 }
 
@@ -474,26 +577,63 @@ func junit(p Payload) string {
 	byPage := map[string][]model.Finding{}
 	for _, f := range p.Findings {
 		byPage[f.PageURL] = append(byPage[f.PageURL], f)
+		for _, also := range f.AlsoOn {
+			byPage[also] = append(byPage[also], f)
+		}
 	}
-	suite := junitSuite{
-		Name: "afford", Timestamp: p.Summary.StartedAt.Format(time.RFC3339),
-		Tests: p.Summary.PagesVisited,
-	}
-	for _, page := range p.Pages {
-		c := junitCase{Name: page.URL, Classname: "afford.pages"}
-		for _, f := range byPage[page.URL] {
+	cases := make([]junitCase, 0, len(p.Pages)+1)
+	failures := 0
+
+	addCase := func(name, classname string, findings []model.Finding) {
+		c := junitCase{Name: name, Classname: classname}
+		var codes []string
+		var bodies []string
+		for _, f := range findings {
 			switch f.Severity {
 			case model.Blocker, model.Critical, model.Major:
-				suite.Failures++
-				c.Failure = &junitFailure{
-					Message: f.Code + ": " + f.Title,
-					Body:    strings.Join(f.Evidence, "\n"),
+				codes = append(codes, f.Code)
+				body := f.Code + ": " + f.Title
+				if len(f.Evidence) > 0 {
+					body += "\n" + strings.Join(f.Evidence, "\n")
 				}
+				bodies = append(bodies, body)
 			default:
 				c.SystemOut = append(c.SystemOut, f.Code+": "+f.Title)
 			}
 		}
-		suite.Cases = append(suite.Cases, c)
+		if len(codes) > 0 {
+			failures++
+			c.Failure = &junitFailure{
+				Message: strings.Join(codes, ", "),
+				Body:    strings.Join(bodies, "\n\n"),
+			}
+		}
+		cases = append(cases, c)
+	}
+
+	covered := map[string]bool{}
+	for _, page := range p.Pages {
+		covered[page.URL] = true
+		addCase(page.URL, "afford.pages", byPage[page.URL])
+	}
+	// A run-level finding (auth wall, harness failure) belongs to no page. It
+	// still has to fail CI, so it is its own testcase rather than disappearing.
+	var runLevel []model.Finding
+	for _, f := range p.Findings {
+		if !covered[f.PageURL] {
+			runLevel = append(runLevel, f)
+		}
+	}
+	if len(runLevel) > 0 {
+		addCase("afford.run", "afford", runLevel)
+	}
+
+	suite := junitSuite{
+		Name:      "afford",
+		Tests:     len(cases),
+		Failures:  failures,
+		Timestamp: p.Summary.StartedAt.Format(time.RFC3339),
+		Cases:     cases,
 	}
 	blob, err := xml.MarshalIndent(suite, "", "  ")
 	if err != nil {
@@ -513,9 +653,14 @@ func markdown(p Payload) string {
 	for _, level := range []model.Severity{model.Blocker, model.Critical, model.Major, model.Minor, model.Info} {
 		fmt.Fprintf(&b, "| %s | %d |\n", level, p.Summary.Counts[level])
 	}
-	fmt.Fprintf(&b, "\nPages visited: %d · controls probed: %d/%d · forms: %d/%d · payloads: %d\n\n",
+	visual := "off"
+	if p.Summary.VisualEnabled {
+		visual = fmt.Sprintf("%d diff(s)", countCode(p.Findings, "E_VISUAL_DIFF"))
+	}
+	fmt.Fprintf(&b, "\nPages visited: %d · controls probed: %d/%d · forms: %d/%d · payloads: %d · links skipped: %d · visual: %s\n\n",
 		p.Summary.PagesVisited, p.Summary.ControlsProbed, p.Summary.ControlsTotal,
-		p.Summary.FormsProbed, p.Summary.FormsTotal, p.Summary.PayloadsSent)
+		p.Summary.FormsProbed, p.Summary.FormsTotal, p.Summary.PayloadsSent,
+		len(p.Links), visual)
 	b.WriteString("## Findings\n\n")
 	if len(p.Findings) == 0 {
 		b.WriteString("_none_\n")

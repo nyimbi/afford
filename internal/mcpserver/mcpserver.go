@@ -125,14 +125,22 @@ type crawlIn struct {
 	Submit   bool   `json:"submit,omitempty" jsonschema:"submit forms during the crawl; mutates server state, default false"`
 }
 
+type pageTiming struct {
+	URL       string `json:"url"`
+	LoadMS    int64  `json:"load_ms"`
+	SettledMS int64  `json:"settled_ms"`
+}
+
 type crawlOut struct {
-	RunID      string          `json:"run_id"`
-	Report     string          `json:"report"`
-	Summary    model.Summary   `json:"summary"`
-	Findings   []model.Finding `json:"findings"`
-	Pages      []string        `json:"pages"`
-	LinkCounts map[string]int  `json:"link_counts"`
-	OK         bool            `json:"ok"`
+	RunID        string             `json:"run_id"`
+	Report       string             `json:"report"`
+	Summary      model.Summary      `json:"summary"`
+	Findings     []model.Finding    `json:"findings"`
+	Pages        []string           `json:"pages"`
+	LinkCounts   map[string]int     `json:"link_counts"`
+	SkippedLinks []model.LinkRecord `json:"skipped_links,omitempty"`
+	Slowest      []pageTiming       `json:"slowest,omitempty"`
+	OK           bool               `json:"ok"`
 }
 
 func (s *Server) checkPage(ctx context.Context, _ *mcp.CallToolRequest, in checkPageIn) (*mcp.CallToolResult, pageOut, error) {
@@ -226,6 +234,7 @@ func (s *Server) crawlSite(ctx context.Context, _ *mcp.CallToolRequest, in crawl
 		reportPath = abs
 	}
 	pages, findings := st.Snapshot()
+	model.SortFindings(findings)
 	urls := make([]string, 0, len(pages))
 	for _, p := range pages {
 		urls = append(urls, p.URL)
@@ -234,9 +243,22 @@ func (s *Server) crawlSite(ctx context.Context, _ *mcp.CallToolRequest, in crawl
 	for _, link := range st.LinkRecords() {
 		linkCounts[link.Disposition]++
 	}
+	links := st.LinkRecords()
+	if len(links) > 50 {
+		links = links[:50]
+	}
+	slowest := make([]pageTiming, 0, len(pages))
+	for _, page := range pages {
+		slowest = append(slowest, pageTiming{URL: page.URL, LoadMS: page.LoadMS, SettledMS: page.SettledMS})
+	}
+	sort.Slice(slowest, func(i, j int) bool { return slowest[i].SettledMS > slowest[j].SettledMS })
+	if len(slowest) > 5 {
+		slowest = slowest[:5]
+	}
 	out := crawlOut{
 		RunID: runID, Report: reportPath, Summary: summary, Findings: findings,
-		Pages: urls, LinkCounts: linkCounts, OK: !hasSerious(summary.Counts),
+		Pages: urls, LinkCounts: linkCounts, SkippedLinks: links, Slowest: slowest,
+		OK: !hasSerious(summary.Counts),
 	}
 	return textResult(digestCrawl(out)), out, nil
 }
@@ -261,6 +283,17 @@ func textResult(text string) *mcp.CallToolResult {
 
 func hasSerious(counts map[model.Severity]int) bool {
 	return counts[model.Blocker]+counts[model.Critical]+counts[model.Major] > 0
+}
+
+func firstEvidence(f model.Finding) string {
+	if len(f.Evidence) == 0 {
+		return ""
+	}
+	line := strings.TrimSpace(f.Evidence[0])
+	if len(line) > 150 {
+		line = line[:149] + "…"
+	}
+	return line
 }
 
 func digestPage(r check.Result) string {
@@ -290,6 +323,9 @@ func digestPage(r check.Result) string {
 		if f.Element != "" {
 			fmt.Fprintf(&b, " [%s]", f.Element)
 		}
+		if first := firstEvidence(f); first != "" {
+			fmt.Fprintf(&b, " — %s", first)
+		}
 	}
 	if r.Screenshot != "" {
 		fmt.Fprintf(&b, "\nscreenshot %s", r.Screenshot)
@@ -313,8 +349,14 @@ func digestCrawl(out crawlOut) string {
 			fmt.Fprintf(&b, "\n- …and %d more", len(out.Findings)-i)
 			break
 		}
-		fmt.Fprintf(&b, "\n- %s %s — %s (%s)",
-			strings.ToUpper(string(f.Severity)), f.Code, f.Title, f.PageURL)
+		fmt.Fprintf(&b, "\n- %s %s — %s (%s)", strings.ToUpper(string(f.Severity)),
+			f.Code, f.Title, f.PageURL)
+		if f.Element != "" {
+			fmt.Fprintf(&b, " [%s]", f.Element)
+		}
+		if first := firstEvidence(f); first != "" {
+			fmt.Fprintf(&b, " — %s", first)
+		}
 	}
 	if len(out.LinkCounts) > 0 {
 		parts := make([]string, 0, len(out.LinkCounts))
@@ -323,6 +365,9 @@ func digestCrawl(out crawlOut) string {
 		}
 		sort.Strings(parts)
 		fmt.Fprintf(&b, "\nlinks not crawled: %s", strings.Join(parts, ", "))
+	}
+	if len(out.Slowest) > 0 {
+		fmt.Fprintf(&b, "\nslowest: %s (%d ms settled)", out.Slowest[0].URL, out.Slowest[0].SettledMS)
 	}
 	fmt.Fprintf(&b, "\nreport %s", out.Report)
 	return b.String()

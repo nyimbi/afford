@@ -165,6 +165,20 @@ func (f Finding) Rank() int {
 	return 9
 }
 
+// SortFindings orders findings worst-first, then by page and code, so every
+// consumer (report, MCP digest, JUnit) tells the same story in the same order.
+func SortFindings(findings []Finding) {
+	sort.SliceStable(findings, func(i, j int) bool {
+		if findings[i].Rank() != findings[j].Rank() {
+			return findings[i].Rank() < findings[j].Rank()
+		}
+		if findings[i].PageURL != findings[j].PageURL {
+			return findings[i].PageURL < findings[j].PageURL
+		}
+		return findings[i].Code < findings[j].Code
+	})
+}
+
 // Specs returns the catalogue sorted worst-first, for `afford checks` and docs.
 func Specs() []FindingSpec {
 	out := make([]FindingSpec, 0, len(specs))
@@ -363,4 +377,5 @@ type Summary struct {
 	PayloadsSent    int              `json:"payloads_sent"`
 	Counts          map[Severity]int `json:"counts"`
 	NotTested       []string         `json:"not_tested"`
+	VisualEnabled   bool             `json:"visual_enabled"`
 }

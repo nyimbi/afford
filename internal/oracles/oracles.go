@@ -322,6 +322,41 @@ func Evaluate(obs model.Observation, pageURL, kind string, element *model.Elemen
 	return out
 }
 
+// FallbackEvidence orders the observation so the actionable line comes first:
+// an exception or an HTTP status, not the effect classification. A digest that
+// leads with "effect=navigated" tells a reader nothing they can act on.
+func FallbackEvidence(obs model.Observation) []string {
+	var lines []string
+	for i, e := range obs.PageErrors {
+		if i >= 3 {
+			break
+		}
+		lines = append(lines, "pageerror: "+e)
+	}
+	for i, r := range obs.ErrorRequests() {
+		if i >= 3 {
+			break
+		}
+		if r.Failed != "" {
+			lines = append(lines, fmt.Sprintf("request failed: %s %s — %s", r.Method, r.URL, r.Failed))
+		} else {
+			lines = append(lines, fmt.Sprintf("HTTP %d: %s %s", r.Status, r.Method, r.URL))
+		}
+	}
+	for i, e := range obs.ConsoleErrors {
+		if i >= 3 {
+			break
+		}
+		lines = append(lines, "console: "+e)
+	}
+	lines = append(lines, "effect="+obs.Effect)
+	if obs.Status > 0 {
+		lines = append(lines, fmt.Sprintf("status=%d", obs.Status))
+	}
+	lines = append(lines, "url="+obs.URLAfter)
+	return lines
+}
+
 func Unlabeled(controls []model.Element, pageURL string) []model.Finding {
 	var out []model.Finding
 	for _, el := range controls {
