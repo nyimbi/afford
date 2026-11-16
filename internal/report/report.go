@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"afford/internal/model"
+	"afford/internal/sarif"
 	"afford/internal/store"
 )
 
@@ -41,6 +42,11 @@ func Write(st *store.Store, runID, baseDir string, summary model.Summary, embed 
 	}
 	if err := os.WriteFile(filepath.Join(baseDir, "junit.xml"), []byte(junit(payload)), 0o644); err != nil {
 		return "", err
+	}
+	if sarifBlob, err := sarif.Render(findings, "0.1.0"); err == nil {
+		if err := os.WriteFile(filepath.Join(baseDir, "results.sarif"), sarifBlob, 0o644); err != nil {
+			return "", err
+		}
 	}
 	if err := os.WriteFile(filepath.Join(baseDir, "summary.md"), []byte(markdown(payload)), 0o644); err != nil {
 		return "", err

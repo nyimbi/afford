@@ -163,6 +163,12 @@ Exit codes are the contract:
 nothing is the failure mode this tool exists to avoid. See `docs/ci.md` for a
 complete GitHub Actions job.
 
+## More than clicking
+
+Per page: leaked `undefined`/`NaN` text, broken images, unhandled rejections, a bounded axe-core set and a Tab-order pass. Per run: extra viewports (`[run] viewports`), role profiles that replay denied routes (`[[auth.profiles]]`), sitemap and manifest routes nothing links to, fixture hooks (`[fixtures]`), a SARIF file, and `afford history`. Password fields are masked in every screenshot. See the user guide.
+
+The Dockerfile and the composite GitHub Action are untested; they need a machine with Docker.
+
 ## Configuration
 
 `afford init` writes a starter `afford.toml`; every key is documented in

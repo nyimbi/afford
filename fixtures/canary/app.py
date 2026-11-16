@@ -13,6 +13,18 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 app = FastAPI(title="afford canary")
 
+# Lifecycle hook calls and the run ids seen on X-Afford-Run, for the canary to read.
+HOOKS: list[dict[str, str]] = []
+RUN_HEADERS: set[str] = set()
+
+
+@app.middleware("http")
+async def record_run_header(request: Request, call_next):
+	run = request.headers.get("x-afford-run")
+	if run:
+		RUN_HEADERS.add(run)
+	return await call_next(request)
+
 # Live sessions. Logging out removes the session server-side, so every browser
 # context sharing that storage state is logged out at once, as in a real app.
 SESSIONS: set[str] = set()
@@ -87,7 +99,8 @@ def index() -> str:
 	<p><a href="/overflow" target="_blank">Open overflow in a new tab</a></p>
 	<p><a href="/late">late render</a> · <a href="/never-ready">never ready</a> · <a href="/flaky">flaky handler</a>
 	 · <a href="/reveal">reveal</a> · <a href="/shadow">shadow</a> · <a href="/frames">frames</a> · <a href="/lazy">lazy</a>
-	 · <a href="/garbage">garbage</a> · <a href="/code-sample">code sample</a> · <a href="/trap">trap</a></p>
+	 · <a href="/garbage">garbage</a> · <a href="/code-sample">code sample</a> · <a href="/trap">trap</a>
+	 · <a href="/admin">admin</a> · <a href="/wide">wide</a></p>
 	<ul>
 	  <li>dashboard needs a session</li>
 	  <li>crash throws on load</li>
@@ -105,7 +118,7 @@ def login_page() -> str:
 
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)) -> Response:
-	if username == "admin" and password == "secret":
+	if (username, password) in {("admin", "secret"), ("viewer", "view")}:
 		response = RedirectResponse("/dashboard", status_code=303)
 		sid = uuid.uuid4().hex
 		SESSIONS.add(sid)
@@ -484,3 +497,40 @@ def trap() -> str:
 	<a href="/dead">after</a>
 	"""
 	return page("Trap", body)
+
+
+@app.get("/_canary/hook")
+def hook(event: str, run: str = "") -> Response:
+	HOOKS.append({"event": event, "run": run})
+	return JSONResponse({"ok": True})
+
+
+@app.get("/_canary/hooks")
+def hooks() -> Response:
+	return JSONResponse({"hooks": HOOKS, "run_headers": sorted(RUN_HEADERS)})
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin(request: Request) -> Response:
+	# Planted: the menu hides this from viewers, the server does not enforce it.
+	if not authed(request):
+		return RedirectResponse("/login", status_code=303)
+	return page("Admin", "<h1>Admin</h1><p>User management.</p>")
+
+
+@app.get("/wide", response_class=HTMLResponse)
+def wide() -> str:
+	# Fits at 1280, overflows at phone width.
+	return page("Wide", "<h1>Wide</h1><div style='width:700px;background:#eee'>fixed-width block</div>")
+
+
+@app.get("/orphan", response_class=HTMLResponse)
+def orphan() -> str:
+	return page("Orphan", "<h1>Orphan</h1><p>Nothing links here.</p>")
+
+
+@app.get("/sitemap.xml")
+def sitemap() -> Response:
+	body = ("<?xml version='1.0'?><urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>"
+		"<url><loc>http://127.0.0.1:8099/</loc></url><url><loc>http://127.0.0.1:8099/orphan</loc></url></urlset>")
+	return Response(body, media_type="application/xml")

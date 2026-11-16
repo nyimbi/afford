@@ -238,7 +238,7 @@ func Specs() []FindingSpec {
 // chrome (a nav link that 404s) is one finding with N locations, not N findings.
 func (f Finding) Key() string {
 	parts := []string{f.Code, f.Element}
-	for _, name := range []string{"url", "status", "error", "requests", "popup_url", "key"} {
+	for _, name := range []string{"url", "status", "error", "requests", "popup_url", "key", "viewport", "role"} {
 		if v, ok := f.Detail[name]; ok {
 			parts = append(parts, name+"="+fmt.Sprint(v))
 		}

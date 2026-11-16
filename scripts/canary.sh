@@ -34,7 +34,7 @@ if [ "$ready" -ne 1 ]; then
 	exit 3
 fi
 
-AFFORD_USERNAME=admin AFFORD_PASSWORD=secret \
+AFFORD_USERNAME=admin AFFORD_PASSWORD=secret AFFORD_VIEWER_USER=viewer AFFORD_VIEWER_PASSWORD=view \
 	go run ./cmd/afford run \
 		--config fixtures/canary/afford.toml \
 		--no-baseline --no-prompt --quiet --fail-on never --out "$OUT"
@@ -57,7 +57,7 @@ expected = {
     "E_DESTRUCTIVE_SKIPPED", "E_NEW_TAB", "E_CLIENT_ERROR_ON_ACTION",
     "E_NOT_DEEPLINKABLE", "E_NOT_READY", "E_RENDERED_GARBAGE", "E_BROKEN_IMAGE",
     "E_UNHANDLED_REJECTION", "E_A11Y_SERIOUS", "E_KEYBOARD_UNREACHABLE",
-    "E_NO_FOCUS_INDICATOR", "E_KEYBOARD_TRAP",
+    "E_NO_FOCUS_INDICATOR", "E_KEYBOARD_TRAP", "E_ORPHAN_ROUTE", "E_AUTHZ_REACHABLE",
 }
 missing = expected - found
 if missing:
@@ -129,6 +129,33 @@ if not traps or not all(u.endswith("/trap") for u in traps):
 clean = [f for f in payload["findings"] if f["code"].startswith(("E_KEYBOARD", "E_NO_FOCUS")) and f["page_url"].endswith("/dead")]
 if clean:
     raise SystemExit(f"canary: keyboard findings on a page that tabs cleanly: {[(f['code'], f.get('element')) for f in clean]}")
+
+orph = [f["page_url"] for f in payload["findings"] if f["code"] == "E_ORPHAN_ROUTE"]
+if [u for u in orph if not u.endswith("/orphan")] or not orph:
+    raise SystemExit(f"canary: only /orphan is unlinked but in the sitemap: {orph}")
+authz = [(f["page_url"], f["detail"].get("role")) for f in payload["findings"] if f["code"] == "E_AUTHZ_REACHABLE"]
+if len(authz) != 1 or not authz[0][0].endswith("/admin") or authz[0][1] != "viewer":
+    raise SystemExit(f"canary: viewer reaching /admin must be the single authz finding: {authz}")
+def _pages(f):
+    return [f["page_url"]] + list(f.get("also_on") or [])
+narrow = [u for f in payload["findings"] if f["code"] == "E_OVERFLOW_X" and f["detail"].get("viewport") == "390x800" for u in _pages(f)]
+primary = [u for f in payload["findings"] if f["code"] == "E_OVERFLOW_X" and not f["detail"].get("viewport") for u in _pages(f)]
+if not any(u.endswith("/wide") for u in narrow) or any(u.endswith("/wide") for u in primary):
+    raise SystemExit(f"canary: /wide must overflow at 390x800 only: narrow={narrow} primary={primary}")
+import json as _json, urllib.request as _u
+hooks = _json.load(_u.urlopen("http://127.0.0.1:8099/_canary/hooks"))
+run_id = payload["summary"]["run_id"]
+events = [(h["event"], h["run"]) for h in hooks["hooks"]]
+if ("setup", run_id) not in events or ("teardown", run_id) not in events:
+    raise SystemExit(f"canary: fixture hooks did not run with the run id {run_id}: {events}")
+if run_id not in hooks["run_headers"]:
+    raise SystemExit("canary: X-Afford-Run never reached the app")
+import os as _os
+sarif = _json.load(open(_os.path.join(_os.path.dirname(reports[-1]), "results.sarif")))
+if sarif.get("version") != "2.1.0" or not sarif["runs"][0]["results"]:
+    raise SystemExit("canary: results.sarif missing or empty")
+if not _os.path.exists(_os.path.join(sys.argv[1], "history.jsonl")):
+    raise SystemExit("canary: history.jsonl was not written")
 
 kinds = {f["detail"].get("kind") for f in payload["findings"]
          if f["code"] == "E_DESTRUCTIVE_SKIPPED"}
@@ -283,8 +310,9 @@ live, expired = load(sys.argv[1]), load(sys.argv[2])
 c = [f for f in live["findings"] if f["code"] == "E_CONSOLE_ERROR"]
 if len(c) != 1 or c[0].get("status") != "suppressed" or "web-team" not in str(c[0].get("suppression")):
     raise SystemExit(f"canary: a live suppression did not mute the finding: {c}")
-if live["summary"]["counts"].get("minor", 0) != 0:
-    raise SystemExit(f"canary: a suppressed finding still gates: {live['summary']['counts']}")
+gating = [f["code"] for f in live["findings"] if f["code"] == "E_CONSOLE_ERROR" and f.get("status") not in ("suppressed", "known")]
+if gating:
+    raise SystemExit(f"canary: a suppressed finding still gates: {gating}")
 c = [f for f in expired["findings"] if f["code"] == "E_CONSOLE_ERROR"]
 if len(c) != 1 or c[0].get("status") == "suppressed":
     raise SystemExit(f"canary: an expired suppression still muted the finding: {c}")

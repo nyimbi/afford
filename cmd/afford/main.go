@@ -20,7 +20,9 @@ import (
 	"afford/internal/auth"
 	"afford/internal/browser"
 	"afford/internal/config"
+	"afford/internal/fixtures"
 	"afford/internal/gate"
+	"afford/internal/history"
 	"afford/internal/mcpserver"
 	"afford/internal/model"
 	"afford/internal/report"
@@ -50,6 +52,8 @@ func dispatch(args []string) int {
 		return cmdInit(args[1:])
 	case "install":
 		return cmdInstall()
+	case "history":
+		return cmdHistory(os.Args[2:])
 	case "checks":
 		return cmdChecks(args[1:])
 	case "version", "--version", "-v":
@@ -72,6 +76,7 @@ func usage() {
   afford init [--base-url URL] [--path afford.toml]
   afford install          # download the Playwright browser once
   afford checks [--json]  # every check afford performs, worst first
+  afford history [--out DIR]  recent runs and how each moved
   afford version
 
 Run options:
@@ -432,6 +437,18 @@ func cmdRun(args []string) int {
 	}
 	defer host.Close()
 
+	hooks := fixtures.New(cfg.Fixtures, runID, cfg.Run.BaseURL)
+	if err := hooks.Setup(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "afford: fixtures setup: %v\n", err)
+		_ = hooks.Teardown()
+		return 3
+	}
+	defer func() {
+		if err := hooks.Teardown(); err != nil {
+			fmt.Fprintf(os.Stderr, "afford: fixtures teardown: %v\n", err)
+		}
+	}()
+
 	authResult, err := auth.Authenticate(host, cfg, !noPrompt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "afford: authentication: %v\n", err)
@@ -449,6 +466,14 @@ func cmdRun(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "afford: write report: %v\n", err)
 		return 3
+	}
+
+	histPath := filepath.Join(cfg.Run.Out, "history.jsonl")
+	pagesNow, _ := st.Snapshot()
+	entry := history.Build(summary, pagesNow)
+	prior, _ := history.Load(histPath)
+	if err := history.Append(histPath, entry); err != nil {
+		fmt.Fprintf(os.Stderr, "afford: history: %v\n", err)
 	}
 
 	if summary.PagesVisited == 0 {
@@ -470,6 +495,7 @@ func cmdRun(args []string) int {
 		if len(summary.NotTested) > 0 {
 			fmt.Printf("not tested: %s\n", strings.Join(summary.NotTested, "; "))
 		}
+		fmt.Println("history: " + history.Delta(entry, history.Previous(prior, entry.BaseURL, entry.RunID)))
 		fmt.Printf("report %s\n", reportPath)
 	}
 
@@ -535,4 +561,37 @@ func randomHex(n int) string {
 		return fmt.Sprintf("%06d", time.Now().UnixNano()%1_000_000)
 	}
 	return hex.EncodeToString(blob)
+}
+
+func cmdHistory(args []string) int {
+	fs := flag.NewFlagSet("history", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	out := fs.String("out", ".afford", "output directory the runs were written to")
+	n := fs.Int("n", 10, "how many recent runs to show")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	entries, err := history.Load(filepath.Join(*out, "history.jsonl"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "afford: %v\n", err)
+		return 3
+	}
+	if len(entries) == 0 {
+		fmt.Println("no runs recorded in " + *out)
+		return 0
+	}
+	if len(entries) > *n {
+		entries = entries[len(entries)-*n:]
+	}
+	for i, e := range entries {
+		var prev *history.Entry
+		if i > 0 {
+			prev = &entries[i-1]
+		}
+		fmt.Printf("%s  %s  pages %d  blocker %d critical %d major %d  load p95 %dms\n    %s\n",
+			e.At.Format("2006-01-02 15:04"), e.RunID, e.Pages,
+			e.Counts["blocker"], e.Counts["critical"], e.Counts["major"], e.LoadP95MS,
+			history.Delta(e, prev))
+	}
+	return 0
 }

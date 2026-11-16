@@ -288,9 +288,9 @@ func (c *Checker) shoot(page playwright.Page, rawURL string) (string, error) {
 	if err != nil {
 		full = path
 	}
-	masks := []string(nil)
+	masks := c.cfg.ScreenshotMasks()
 	if c.cfg.Visual.Enabled {
-		masks = c.cfg.Visual.Mask
+		masks = append(masks, c.cfg.Visual.Mask...)
 	}
 	if _, err := browser.Screenshot(page, full, masks); err != nil {
 		return "", err

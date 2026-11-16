@@ -255,6 +255,69 @@ See [File uploads](#file-uploads).
 
 See [Visual regression](#visual-regression).
 
+## Beyond the click: page audits, viewports, roles, routes
+
+Each page also gets these checks. Switch the heavy ones off with `[run] a11y = false` and `[run] keyboard = false`.
+
+| Check | Code | What it means |
+|---|---|---|
+| Rendered text | `E_RENDERED_GARBAGE` | `undefined`, `NaN`, `[object Object]`, `{{ x }}` or a stack trace in visible prose. Text inside `code` and `pre` is ignored. |
+| Images | `E_BROKEN_IMAGE` | An image finished loading with zero pixels. |
+| Promises | `E_UNHANDLED_REJECTION` | A rejection nothing caught, recorded by an init script from the first byte of the page. |
+| axe-core | `E_A11Y_SERIOUS`, `E_A11Y_MINOR` | A bounded set of 21 axe rules (the embedded copy is archived in `sources/`). Serious and critical map to the first code, the rest to the second. |
+| Keyboard | `E_KEYBOARD_TRAP`, `E_KEYBOARD_UNREACHABLE`, `E_NO_FOCUS_INDICATOR` | Tab never moves on, a visible control never receives focus, or focus changes nothing visible. Cross-origin frames are opaque and not judged. |
+
+### Viewports
+
+`[run] viewports = [[390, 800]]` revisits every page at each extra size. This pass only loads, scans for horizontal overflow and takes a screenshot; it clicks nothing. Baselines are keyed per route template and viewport, and an overflow finding carries `viewport` in its detail so it never merges with the primary-size finding.
+
+### Roles
+
+```toml
+[[auth.profiles]]
+name = "viewer"
+mode = "form"
+username_env = "VIEWER_USER"
+password_env = "VIEWER_PASSWORD"
+deny = ["/admin", "/admin/**"]
+```
+
+After the main crawl afford logs in as each profile and loads every page the primary role found that matches `deny`. A page that loads (no login redirect, status below 400, same URL) is `E_AUTHZ_REACHABLE`: the menu hides the route and the server does not. A profile that cannot log in is listed under not-tested, not skipped silently.
+
+### Routes the crawl did not reach
+
+```toml
+[routes]
+sitemap = true            # /robots.txt Sitemap lines, /sitemap.xml, nested sitemaps (same origin only)
+manifest = true           # Next.js _buildManifest.js
+extra = ["/admin/audit"]
+```
+
+A route named there that no link led to is `E_ORPHAN_ROUTE`, and it is then visited like any other page.
+
+### Fixtures and run identity
+
+```toml
+[fixtures]
+setup = "./scripts/seed.sh"
+teardown = "./scripts/unseed.sh"
+timeout_secs = 120
+```
+
+Both commands run under `sh -c` with `AFFORD_RUN_ID` and `AFFORD_BASE_URL` in the environment. A failing setup stops the run before the browser starts. Teardown runs even when the crawl fails. Every browser request carries `X-Afford-Run: <run id>`, so the server and its logs can tell test traffic apart.
+
+### Privacy
+
+Password inputs are masked in every screenshot, including popups and MCP captures. Add selectors with `[privacy] mask = ["#ssn"]`.
+
+### Visual maintenance
+
+With `[visual]` on, each page is captured twice 400 ms apart. If the two differ by more than `threshold_pct`, the page is reported as not compared and the reason names the moving region; a diff against an unstable page is noise. `update_pages = ["/pricing"]` limits `--update-baseline` to matching routes. Baselines older than `max_age_days` (default 90) are listed under not-tested.
+
+### History and SARIF
+
+Every run appends one line to `<out>/history.jsonl` (counts, load and settle p50/p95, duration) and prints how it moved against the previous run for the same base URL. `afford history [--out DIR] [-n N]` lists them. Each run directory also holds `results.sarif` (SARIF 2.1.0) for code-scanning upload.
+
 ## Running a crawl
 
 ```sh
@@ -816,15 +879,14 @@ afford is a smoke test, not a specification.
   visible response.
 - It samples page states. A route with ten data-driven variants gets at most a few
   instances, and the report says how many.
-- It does not test pages it cannot reach. Pages behind a different role, a
-  feature flag, or a click-only route are outside a single run unless the crawler
-  found them.
+- It does not test pages it cannot reach. Role profiles replay only the pages the
+  primary role found; a feature flag or a route nothing names stays outside the run.
 - It does not drive popups, file pickers or native dialogs beyond the synthetic
   interactions described here.
 - Visual comparison is platform-specific and must be maintained. A stale baseline
   is worse than no baseline.
-- Accessibility coverage is limited to missing labels. It is not an accessibility
-  audit.
+- Accessibility coverage is a bounded axe-core rule set plus a Tab pass. Automated
+  checks find a minority of real accessibility problems; this is not an audit.
 - The reports state what was skipped. Read that section before trusting a clean
   run.
 

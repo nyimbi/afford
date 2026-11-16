@@ -23,4 +23,9 @@ Go 1.22+, stdlib plus Playwright-Go. No cgo.
 - Gate layers, in order: confirm-on-reprobe, `[policy]` severity, suppression, baseline. Only `Finding.Gates()` findings count toward `Summary.Counts` and the exit code; `Summary.Totals` holds all. Fingerprints exclude the page; baseline entries own the union of every page sharing a fingerprint.
 - Shared page-level oracles live in `internal/pass` so `run` and `check` cannot diverge. Add new page checks there.
 - Each page visit uses a fresh context from the storage state; `visitSafely(nil, item)` is the unit-test seam, keep its signature.
+- Page audits (`internal/audit`: text, images, rejections, axe, keyboard) run from `internal/pass`. `audit.InitScript` is installed in `browser.NewProbePage`. Extra passes (viewports, roles, orphan routes) live in `internal/run/extras.go`; they only add findings, never probe controls.
+- `Finding.Key()` includes `viewport` and `role`; add any detail that distinguishes two findings there, or they merge into one with `AlsoOn`.
+- Canary assertions on merged findings must read `also_on`, not just `page_url`.
+- Every screenshot goes through `Config.ScreenshotMasks()` (password inputs always masked).
+- Dockerfile and `.github/actions/afford` are untested; podman only here.
 - gofmt before committing.

@@ -83,8 +83,11 @@ type Runner struct {
 	sessionGen int
 	refreshes  int
 	sessionMu  sync.Mutex
-	reauthFlag map[string]bool // page URL → a re-login was requested for it
-	reauthDone map[string]bool // page URL → it already had its one retry
+	reauthFlag map[string]bool   // page URL → a re-login was requested for it
+	reauthDone map[string]bool   // page URL → it already had its one retry
+	unstable   map[string]string // page URL → why two captures disagreed
+	rateLimits int
+	pagesSeen  []string // URLs visited, for viewport and role passes
 }
 
 func New(cfg config.Config, st *store.Store, runID, baseDir string, ctx context.Context) *Runner {
@@ -93,6 +96,7 @@ func New(cfg config.Config, st *store.Store, runID, baseDir string, ctx context.
 		seen: map[string]bool{}, templateCounts: map[string]int{},
 		notTested: map[string]int{}, skipped: map[string]int{},
 		reauthFlag: map[string]bool{}, reauthDone: map[string]bool{},
+		unstable: map[string]string{},
 	}
 	runner.visitPage = runner.visit
 	return runner
@@ -133,18 +137,7 @@ func (r *Runner) enqueue(next *[]Item, raw string, depth int, parent, how string
 	*next = append(*next, Item{URL: url, Depth: depth, Parent: parent})
 }
 
-func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary, error) {
-	r.started = time.Now().UTC()
-	r.host = host
-	r.session = authResult
-	// A fresh browser context per page: cookies and the session come from the
-	// storage state each time, but nothing one page wrote to localStorage can
-	// leak into the next. The semaphore bounds concurrency.
-	sem := make(chan struct{}, r.cfg.Limits.Concurrency)
-
-	var frontier []Item
-	r.enqueue(&frontier, r.cfg.Run.BaseURL, 0, "", "seed")
-
+func (r *Runner) crawl(frontier []Item, sem chan struct{}) {
 	for len(frontier) > 0 {
 		if err := r.ctx.Err(); err != nil {
 			r.notTested["run deadline reached"] += len(frontier)
@@ -174,7 +167,34 @@ func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary,
 		}
 		frontier = next
 	}
+}
 
+func (r *Runner) Run(host *browser.Host, authResult auth.Result) (model.Summary, error) {
+	r.started = time.Now().UTC()
+	r.host = host
+	r.session = authResult
+	// A fresh browser context per page: cookies and the session come from the
+	// storage state each time, but nothing one page wrote to localStorage can
+	// leak into the next. The semaphore bounds concurrency.
+	sem := make(chan struct{}, r.cfg.Limits.Concurrency)
+
+	var frontier []Item
+	r.enqueue(&frontier, r.cfg.Run.BaseURL, 0, "", "seed")
+	r.crawl(frontier, sem)
+
+	// Routes the link crawl never reached: named by a sitemap, a framework
+	// manifest or the config. Each is an orphan finding, and each is then visited
+	// so the page behind it is checked like any other.
+	if orphans := r.orphanRoutes(); len(orphans) > 0 && r.ctx.Err() == nil {
+		var extra []Item
+		for _, o := range orphans {
+			r.enqueue(&extra, o, 1, "", "route")
+		}
+		r.crawl(extra, sem)
+	}
+
+	r.viewportPass()
+	r.rolePass()
 	r.finalChecks()
 	return r.finish()
 }
@@ -307,6 +327,11 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
 		r.bump(r.notTested, "DOM scan failed", 1)
 		return nil
 	}
+	if !authRedirect && load.OK {
+		r.mu.Lock()
+		r.pagesSeen = append(r.pagesSeen, url)
+		r.mu.Unlock()
+	}
 	if load.ScrollTruncated {
 		r.bump(r.notTested, "scroll-to-load stopped at its step bound; the page may have more content", 1)
 	}
@@ -339,7 +364,7 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
 	r.mu.Lock()
 	r.stats.pagesVisited++
 	r.mu.Unlock()
-	r.compareVisual(url, discover.Template(url), screenshotRel)
+	r.compareVisual(url, discover.Template(url), screenshotRel, r.cfg.Run.Viewport)
 
 	obs, captureFindings := pass.Capture(page, collector, r.cfg, url, final, authRedirect, load, scanResult)
 	_ = obs
@@ -390,12 +415,28 @@ func (r *Runner) shoot(page playwright.Page, url string) (string, error) {
 	sum := sha1.Sum([]byte(url))
 	relative := "screenshots/" + hex.EncodeToString(sum[:])[:12] + ".png"
 	path := filepath.Join(r.baseDir, relative)
-	masks := []string(nil)
+	masks := r.cfg.ScreenshotMasks()
 	if r.cfg.Visual.Enabled {
-		masks = r.cfg.Visual.Mask
+		masks = append(masks, r.cfg.Visual.Mask...)
 	}
 	if _, err := browser.Screenshot(page, path, masks); err != nil {
 		return "", err
+	}
+	if r.cfg.Visual.Enabled {
+		// Two captures of an idle page must agree. If they do not, the page has
+		// an animation or live data nobody masked, and a diff against it is noise.
+		page.WaitForTimeout(400)
+		second := filepath.Join(r.baseDir, "screenshots", ".stability.png")
+		if _, err := browser.Screenshot(page, second, masks); err == nil {
+			a, _ := os.ReadFile(path)
+			b, _ := os.ReadFile(second)
+			_ = os.Remove(second)
+			if d, err := visual.Compare(a, b, r.cfg.Visual.Tolerance); err == nil && d.Pct > r.cfg.Visual.ThresholdPct {
+				r.mu.Lock()
+				r.unstable[url] = fmt.Sprintf("%.2f%% of pixels changed between two captures 400ms apart", d.Pct)
+				r.mu.Unlock()
+			}
+		}
 	}
 	return relative, nil
 }
@@ -577,8 +618,15 @@ func (r *Runner) probeControls(
 // compareVisual runs the baseline comparison for one page and records what it
 // decided. Artifacts are written under the run directory so the report can show
 // the three images side by side.
-func (r *Runner) compareVisual(rawURL, template, shotRel string) {
+func (r *Runner) compareVisual(rawURL, template, shotRel string, viewport []int) {
 	if !r.cfg.Visual.Enabled || shotRel == "" || r.visualIgnored(rawURL) {
+		return
+	}
+	r.mu.Lock()
+	why, unstable := r.unstable[rawURL]
+	r.mu.Unlock()
+	if unstable {
+		r.bump(r.notTested, "visual: "+template+" not compared, unstable: "+why+" (mask the moving region)", 1)
 		return
 	}
 	current, err := os.ReadFile(filepath.Join(r.baseDir, shotRel))
@@ -586,11 +634,19 @@ func (r *Runner) compareVisual(rawURL, template, shotRel string) {
 		r.bump(r.notTested, "visual: screenshot unreadable", 1)
 		return
 	}
-	key := visual.Key(template, r.cfg.Run.Viewport)
-	outcome := visual.Consider(
-		visual.Store{Dir: r.cfg.Visual.Dir},
-		r.cfg.Visual, key, current, filepath.Join(r.baseDir, "visual"),
-	)
+	key := visual.Key(template, viewport)
+	store := visual.Store{Dir: r.cfg.Visual.Dir}
+	vcfg := r.cfg.Visual
+	if vcfg.UpdateBaseline && len(vcfg.UpdatePages) > 0 && !matchAny(vcfg.UpdatePages, rawURL) {
+		vcfg.UpdateBaseline = false
+	}
+	if vcfg.MaxAgeDays > 0 {
+		if info, err := os.Stat(store.Path(key)); err == nil && !vcfg.UpdateBaseline &&
+			time.Since(info.ModTime()) > time.Duration(vcfg.MaxAgeDays)*24*time.Hour {
+			r.bump(r.notTested, fmt.Sprintf("visual: baseline for %s is older than %d days", template, vcfg.MaxAgeDays), 1)
+		}
+	}
+	outcome := visual.Consider(store, vcfg, key, current, filepath.Join(r.baseDir, "visual"))
 	switch outcome.Action {
 	case "seeded", "updated":
 		f := model.NewFinding("E_VISUAL_BASELINE_WRITTEN", rawURL)
@@ -605,6 +661,7 @@ func (r *Runner) compareVisual(rawURL, template, shotRel string) {
 		f.Detail["changed_pixels"] = outcome.Changed
 		f.Detail["total_pixels"] = outcome.Total
 		f.Detail["size_changed"] = outcome.SizeChanged
+		f.Detail["viewport"] = fmt.Sprintf("%dx%d", viewport[0], viewport[1])
 		f.Detail["baseline"] = relPath(r.baseDir, outcome.Baseline)
 		f.Detail["current"] = relPath(r.baseDir, outcome.Current)
 		f.Detail["diff"] = relPath(r.baseDir, outcome.Diff)

@@ -28,8 +28,35 @@ type Config struct {
 	Readiness ReadinessConfig `toml:"readiness"`
 	Policy    PolicyConfig    `toml:"policy"`
 	Baseline  BaselineConfig  `toml:"baseline"`
+	Privacy   PrivacyConfig   `toml:"privacy"`
 	Fixtures  FixturesConfig  `toml:"fixtures"`
 	Routes    RoutesConfig    `toml:"routes"`
+}
+
+// PrivacyConfig controls what a screenshot may show. Password fields are always
+// masked; screenshots land in CI artifacts that more people can open than can
+// open the app.
+type PrivacyConfig struct {
+	Mask []string `toml:"mask"`
+}
+
+// ScreenshotMasks returns every selector masked in every screenshot.
+func (c Config) ScreenshotMasks() []string {
+	out := []string{"input[type=password]"}
+	out = append(out, c.Privacy.Mask...)
+	return out
+}
+
+// Profile is one role in a multi-role run. The first authentication in
+// [auth] is the primary role; each profile is replayed against the pages it
+// found, with its own session.
+type Profile struct {
+	Name         string   `toml:"name"`
+	Mode         string   `toml:"mode"`
+	UsernameEnv  string   `toml:"username_env"`
+	PasswordEnv  string   `toml:"password_env"`
+	StorageState string   `toml:"storage_state"`
+	Deny         []string `toml:"deny"`
 }
 
 // FixturesConfig names commands that seed and clean the data a run needs. Both
@@ -92,6 +119,11 @@ type VisualConfig struct {
 	Mask           []string `toml:"mask"`
 	Ignore         []string `toml:"ignore"`
 	Dir            string   `toml:"dir"`
+	// UpdatePages limits baseline updates to routes matching these globs; empty
+	// means --update-baseline updates every page.
+	UpdatePages []string `toml:"update_pages"`
+	// MaxAgeDays notes baselines older than this (0 turns it off).
+	MaxAgeDays int `toml:"max_age_days"`
 }
 
 // PopupsConfig controls what happens to pages a control opens in a new tab.
@@ -165,6 +197,7 @@ type AuthConfig struct {
 	PasswordEnv        string            `toml:"password_env"`
 	ExtraHeaders       map[string]string `toml:"extra_headers"`
 	LoginPathPatterns  []string          `toml:"login_path_patterns"`
+	Profiles           []Profile         `toml:"profiles"`
 }
 
 type SafetyConfig struct {
@@ -292,7 +325,7 @@ func Default() Config {
 		MCP:       MCPConfig{CallTimeoutSecs: 120, MaxControls: 40},
 		Uploads:   UploadsConfig{},
 		Popups:    PopupsConfig{Mode: "capture", Max: 5},
-		Visual:    VisualConfig{ThresholdPct: 0.1, Tolerance: 12, Dir: ".afford/baselines"},
+		Visual:    VisualConfig{ThresholdPct: 0.1, Tolerance: 12, Dir: ".afford/baselines", MaxAgeDays: 90},
 		Readiness: ReadinessConfig{TimeoutMS: 8000},
 		Baseline:  BaselineConfig{File: ".afford/findings-baseline.json", SuppressFile: "afford.suppress.toml"},
 	}

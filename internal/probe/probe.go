@@ -431,7 +431,7 @@ func capturePopups(pages []playwright.Page, cfg config.Config, shotDir string) [
 			}
 			if shotDir != "" {
 				name := fmt.Sprintf("popup-%s.png", shortHash(result.URL))
-				if path, shotErr := browser.Screenshot(popup, filepath.Join(shotDir, name), nil); shotErr == nil {
+				if path, shotErr := browser.Screenshot(popup, filepath.Join(shotDir, name), cfg.ScreenshotMasks()); shotErr == nil {
 					result.Screenshot = path
 				}
 			}

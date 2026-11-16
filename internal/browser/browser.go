@@ -63,10 +63,15 @@ func (h *Host) Close() {
 }
 
 func (h *Host) NewContext(statePath string, creds *playwright.HttpCredentials, headers map[string]string) (playwright.BrowserContext, error) {
+	return h.NewSizedContext(statePath, creds, headers, h.cfg.Run.Viewport[0], h.cfg.Run.Viewport[1])
+}
+
+// NewSizedContext is NewContext at an explicit viewport.
+func (h *Host) NewSizedContext(statePath string, creds *playwright.HttpCredentials, headers map[string]string, width, height int) (playwright.BrowserContext, error) {
 	opts := playwright.BrowserNewContextOptions{
 		Viewport: &playwright.Size{
-			Width:  h.cfg.Run.Viewport[0],
-			Height: h.cfg.Run.Viewport[1],
+			Width:  width,
+			Height: height,
 		},
 		IgnoreHttpsErrors: playwright.Bool(true),
 		UserAgent: playwright.String(

@@ -81,3 +81,7 @@ dead controls, and console errors without writing anything.
 Deletion and other irreversible actions stay off unless granted: `--allow-delete` for
 delete/erase controls, `--allow-side-effects` for pay/send/publish/logout/approve, or
 `--allow-destructive` for both. Do not grant them unless the database can be thrown away.
+
+## SARIF
+
+Each run writes `results.sarif` next to `report.json`. Upload it with `github/codeql-action/upload-sarif` to show findings in code scanning. The Dockerfile and `.github/actions/afford` are untested.

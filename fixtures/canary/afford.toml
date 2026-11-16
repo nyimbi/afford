@@ -3,6 +3,7 @@ base_url = "http://127.0.0.1:8099"
 depth = "standard"
 concurrency = 2
 viewport = [1280, 900]
+viewports = [[390, 800]]
 out = ".afford/canary"
 
 [scope]
@@ -13,6 +14,20 @@ exclude = ["/logout", "/signout", "/api/**"]
 mode = "form"
 login_url = "/login"
 success_url_contains = "/dashboard"
+
+[[auth.profiles]]
+name = "viewer"
+mode = "form"
+username_env = "AFFORD_VIEWER_USER"
+password_env = "AFFORD_VIEWER_PASSWORD"
+deny = ["/admin"]
+
+[routes]
+sitemap = true
+
+[fixtures]
+setup = "curl -s \"http://127.0.0.1:8099/_canary/hook?event=setup&run=$AFFORD_RUN_ID\""
+teardown = "curl -s \"http://127.0.0.1:8099/_canary/hook?event=teardown&run=$AFFORD_RUN_ID\""
 
 [safety]
 allow_destructive = false
