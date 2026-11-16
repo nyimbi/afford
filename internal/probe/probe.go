@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,7 +33,11 @@ type Load struct {
 	// the step bound ended it while the page was still growing.
 	Scrolled        int
 	ScrollTruncated bool
-	Err             error
+	// RateLimited means the navigation got a 429 and was retried after the
+	// server's Retry-After (bounded); StillLimited means the retry got 429 too.
+	RateLimited  bool
+	StillLimited bool
+	Err          error
 }
 
 const navTimingJS = `() => {
@@ -75,6 +80,31 @@ func Reset(page playwright.Page, cfg config.Config, url string) Load {
 			SettledMS: time.Since(started).Milliseconds(),
 		}
 	}
+	limited, still := false, false
+	for attempt := 0; attempt < 2 && response != nil && response.Status() == 429; attempt++ {
+		limited = true
+		wait := 2 * time.Second
+		if v := response.Headers()["retry-after"]; v != "" {
+			if secs, convErr := strconv.Atoi(strings.TrimSpace(v)); convErr == nil && secs >= 0 {
+				wait = time.Duration(secs) * time.Second
+			}
+		}
+		if wait > 8*time.Second {
+			wait = 8 * time.Second
+		}
+		time.Sleep(wait)
+		again, gotoErr := page.Goto(url, playwright.PageGotoOptions{
+			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+			Timeout:   playwright.Float(float64(cfg.Limits.NavigationTimeoutMS)),
+		})
+		if gotoErr != nil {
+			break
+		}
+		response = again
+	}
+	if limited && response != nil && response.Status() == 429 {
+		still = true
+	}
 	notReady := browser.SettleReady(page, cfg)
 	settled := time.Since(started).Milliseconds()
 	scrolled, truncated := browser.ScrollToLoad(page, cfg)
@@ -90,6 +120,7 @@ func Reset(page playwright.Page, cfg config.Config, url string) Load {
 		OK: true, Status: status, FinalURL: page.URL(),
 		LoadMS: loadMS, SettledMS: settled, NotReady: notReady,
 		Scrolled: scrolled, ScrollTruncated: truncated,
+		RateLimited: limited, StillLimited: still,
 	}
 }
 

@@ -100,7 +100,7 @@ def index() -> str:
 	<p><a href="/late">late render</a> · <a href="/never-ready">never ready</a> · <a href="/flaky">flaky handler</a>
 	 · <a href="/reveal">reveal</a> · <a href="/shadow">shadow</a> · <a href="/frames">frames</a> · <a href="/lazy">lazy</a>
 	 · <a href="/garbage">garbage</a> · <a href="/code-sample">code sample</a> · <a href="/trap">trap</a>
-	 · <a href="/admin">admin</a> · <a href="/wide">wide</a></p>
+	 · <a href="/admin">admin</a> · <a href="/wide">wide</a> · <a href="/throttled">throttled</a></p>
 	<ul>
 	  <li>dashboard needs a session</li>
 	  <li>crash throws on load</li>
@@ -534,3 +534,15 @@ def sitemap() -> Response:
 	body = ("<?xml version='1.0'?><urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>"
 		"<url><loc>http://127.0.0.1:8099/</loc></url><url><loc>http://127.0.0.1:8099/orphan</loc></url></urlset>")
 	return Response(body, media_type="application/xml")
+
+
+THROTTLE = {"hits": 0}
+
+
+@app.get("/throttled", response_class=HTMLResponse)
+def throttled() -> Response:
+	# 429 with Retry-After on the first load of each run; fine on the retry.
+	THROTTLE["hits"] += 1
+	if THROTTLE["hits"] % 2 == 1:
+		return HTMLResponse("slow down", status_code=429, headers={"Retry-After": "1"})
+	return HTMLResponse(page("Throttled", "<h1>Throttled</h1><p>Served after backoff.</p>"))

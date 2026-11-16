@@ -21,6 +21,7 @@ import (
 	"afford/internal/browser"
 	"afford/internal/check"
 	"afford/internal/config"
+	"afford/internal/history"
 	"afford/internal/model"
 	"afford/internal/report"
 	"afford/internal/run"
@@ -244,6 +245,8 @@ func (s *Server) crawlSite(ctx context.Context, _ *mcp.CallToolRequest, in crawl
 	if abs, absErr := filepath.Abs(reportPath); absErr == nil {
 		reportPath = abs
 	}
+	pagesNow, _ := st.Snapshot()
+	_ = history.Append(filepath.Join(s.cfg.Run.Out, "history.jsonl"), history.Build(summary, pagesNow))
 	pages, findings := st.Snapshot()
 	model.SortFindings(findings)
 	urls := make([]string, 0, len(pages))
@@ -434,6 +437,20 @@ func (s *Server) Run(ctx context.Context) error {
 			"Forms are not submitted unless submit=true; deletion and other irreversible controls remain " +
 			"quarantined unless the server was started with the matching grant.",
 	}, s.crawlSite)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_runs",
+		Description: "List recent crawl runs recorded in the output directory, with how each moved against the one before it.",
+	}, s.listRuns)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_run",
+		Description: "Fetch one earlier crawl's summary and its worst findings by run id.",
+	}, s.getRun)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_screenshot",
+		Description: "Return one screenshot as a PNG image. Only paths inside the output directory are served. " +
+			"Call this only when the pixels matter; findings already carry the evidence as text.",
+	}, s.getScreenshot)
 
 	return server.Run(ctx, &mcp.StdioTransport{})
 }

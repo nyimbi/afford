@@ -28,4 +28,5 @@ Go 1.22+, stdlib plus Playwright-Go. No cgo.
 - Canary assertions on merged findings must read `also_on`, not just `page_url`.
 - Every screenshot goes through `Config.ScreenshotMasks()` (password inputs always masked).
 - Dockerfile and `.github/actions/afford` are untested; podman only here.
+- MCP run tools (`internal/mcpserver/runs.go`) read `<out>/history.jsonl` and report.json; `get_screenshot` must stay confined to the output directory (`make mcp-smoke` canaries it with `/etc/hosts`).
 - gofmt before committing.

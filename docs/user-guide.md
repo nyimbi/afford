@@ -306,6 +306,10 @@ timeout_secs = 120
 
 Both commands run under `sh -c` with `AFFORD_RUN_ID` and `AFFORD_BASE_URL` in the environment. A failing setup stops the run before the browser starts. Teardown runs even when the crawl fails. Every browser request carries `X-Afford-Run: <run id>`, so the server and its logs can tell test traffic apart.
 
+### Rate limiting
+
+A navigation answered with 429 waits for `Retry-After` (capped at 8 s, 2 s when absent) and retries up to twice. Any 429 raises `E_RATE_LIMITED` (minor); `still_limited` in its detail says whether the retries also failed. Lower `[limits] concurrency` if you see it.
+
 ### Privacy
 
 Password inputs are masked in every screenshot, including popups and MCP captures. Add selectors with `[privacy] mask = ["#ssn"]`.

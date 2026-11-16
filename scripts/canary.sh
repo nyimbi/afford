@@ -57,7 +57,7 @@ expected = {
     "E_DESTRUCTIVE_SKIPPED", "E_NEW_TAB", "E_CLIENT_ERROR_ON_ACTION",
     "E_NOT_DEEPLINKABLE", "E_NOT_READY", "E_RENDERED_GARBAGE", "E_BROKEN_IMAGE",
     "E_UNHANDLED_REJECTION", "E_A11Y_SERIOUS", "E_KEYBOARD_UNREACHABLE",
-    "E_NO_FOCUS_INDICATOR", "E_KEYBOARD_TRAP", "E_ORPHAN_ROUTE", "E_AUTHZ_REACHABLE",
+    "E_NO_FOCUS_INDICATOR", "E_KEYBOARD_TRAP", "E_ORPHAN_ROUTE", "E_AUTHZ_REACHABLE", "E_RATE_LIMITED",
 }
 missing = expected - found
 if missing:
@@ -130,6 +130,11 @@ clean = [f for f in payload["findings"] if f["code"].startswith(("E_KEYBOARD", "
 if clean:
     raise SystemExit(f"canary: keyboard findings on a page that tabs cleanly: {[(f['code'], f.get('element')) for f in clean]}")
 
+lim = [f for f in payload["findings"] if f["code"] == "E_RATE_LIMITED"]
+if not lim or any(f["detail"].get("still_limited") for f in lim):
+    raise SystemExit(f"canary: a 429 that clears on retry must be one non-persistent E_RATE_LIMITED: {[f['detail'] for f in lim]}")
+if not any(p["url"].endswith("/throttled") and p.get("status") == 200 for p in payload["pages"]):
+    raise SystemExit("canary: /throttled was not re-fetched after Retry-After")
 orph = [f["page_url"] for f in payload["findings"] if f["code"] == "E_ORPHAN_ROUTE"]
 if [u for u in orph if not u.endswith("/orphan")] or not orph:
     raise SystemExit(f"canary: only /orphan is unlinked but in the sitemap: {orph}")

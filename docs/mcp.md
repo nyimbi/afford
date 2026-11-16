@@ -106,3 +106,13 @@ evidence is what makes a finding checkable, and a finding without evidence is a 
 | `refusing to open http://…: it is neither the configured origin …` | URL outside the allowlist |
 | `could not open http://…: …` | navigation failed — DNS, TLS, or the app is down |
 | `depth must be smoke, standard or deep` | bad argument |
+
+## Run history and screenshots
+
+| Tool | Returns |
+|---|---|
+| `list_runs` | Recent runs from `<out>/history.jsonl`, each with how it moved against the one before. Crawls started over MCP are recorded too. |
+| `get_run` | One run's summary and its worst findings (`limit`, default 25) by run id. The id must match `[0-9A-Za-z_-]+`. |
+| `get_screenshot` | One PNG as an image block. Serves only `.png` files inside the output directory; any other path is an error. |
+
+Images are not attached to other results. An agent pays for pixels only by calling `get_screenshot`.

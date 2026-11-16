@@ -76,6 +76,11 @@ func Capture(
 	findings = append(findings, oracles.Unlabeled(visible, pageURL)...)
 	findings = append(findings, oracles.EmptyHref(visible, pageURL)...)
 	findings = append(findings, oracles.OptionsAudit(visible, pageURL)...)
+	if load.RateLimited {
+		f := model.NewFinding("E_RATE_LIMITED", pageURL)
+		f.Detail["still_limited"] = load.StillLimited
+		findings = append(findings, f)
+	}
 	findings = append(findings, audit.RenderedText(page, pageURL)...)
 	findings = append(findings, audit.BrokenImages(page, pageURL)...)
 	findings = append(findings, audit.Rejections(page, pageURL)...)

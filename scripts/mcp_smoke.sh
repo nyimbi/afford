@@ -121,7 +121,7 @@ try:
 
     listed = recv(send("tools/list", {}))
     names = {t["name"] for t in listed["result"]["tools"]}
-    missing_tools = {"check_page", "inspect_page", "crawl_site"} - names
+    missing_tools = {"check_page", "inspect_page", "crawl_site", "list_runs", "get_run", "get_screenshot"} - names
     if missing_tools:
         raise SystemExit(f"mcp smoke: missing tools {sorted(missing_tools)}")
 
@@ -156,6 +156,20 @@ try:
         raise SystemExit("mcp smoke: crawl_site captured no pages")
     if not os.path.exists(cr.get("report", "")):
         raise SystemExit(f"mcp smoke: crawl report missing: {cr.get('report')!r}")
+
+    listing = call("list_runs", {})["structuredContent"]["runs"]
+    if cr["run_id"] not in {r["run_id"] for r in listing}:
+        raise SystemExit(f"mcp smoke: list_runs does not show the crawl {cr['run_id']}: {listing}")
+    got = call("get_run", {"run_id": cr["run_id"], "limit": 2})
+    if got.get("isError") or got["structuredContent"]["summary"]["run_id"] != cr["run_id"]:
+        raise SystemExit(f"mcp smoke: get_run did not return the crawl: {got}")
+    if not call("get_run", {"run_id": "../../etc"}).get("isError"):
+        raise SystemExit("mcp smoke: get_run accepted a path as a run id")
+    image = call("get_screenshot", {"path": shot})
+    if image.get("isError") or not any(c.get("type") == "image" and c.get("mimeType") == "image/png" for c in image["content"]):
+        raise SystemExit(f"mcp smoke: get_screenshot returned no PNG image block: {image}")
+    if not call("get_screenshot", {"path": "/etc/hosts"}).get("isError"):
+        raise SystemExit("mcp smoke: get_screenshot served a file outside the output directory")
 
     print(f"mcp smoke ok: tools={sorted(names)} screenshot={os.path.basename(shot)} "
           f"crawl_pages={len(cr['pages'])}")
