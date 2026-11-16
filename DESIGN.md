@@ -184,3 +184,11 @@ wall clock; `--no-prompt` turns missing credentials into a failure instead of a 
 - v0.3 — run-to-run diff of findings (new/fixed, not just visual), axe-core a11y pass,
   trace zip per failure.
 - v0.4 — click-path replay for pages that cannot be deep-linked; interaction inside popups.
+
+## Added after the first release
+
+- **Page audits** run from one shared pass (`internal/pass`) so `run` and `check` cannot diverge: rendered-text leakage, broken images, unhandled rejections, a bounded axe-core set, a Tab pass.
+- **Extra passes** (`internal/run/extras.go`) never click: extra viewports, role replay against declared `deny` globs, and routes the sitemap or manifest names that no link reaches.
+- **Run lifecycle**: fixture hooks bracket the run, every request carries `X-Afford-Run`, and each run appends to `history.jsonl`.
+- **Privacy**: password inputs are masked in every screenshot, unconditionally.
+- **Untested**: the Dockerfile and the composite GitHub Action have never run here.

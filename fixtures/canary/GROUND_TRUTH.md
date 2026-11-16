@@ -37,6 +37,13 @@ AFFORD_USERNAME=admin AFFORD_PASSWORD=secret \
 | `/dashboard` | "Delete order" control is quarantined | `E_DESTRUCTIVE_SKIPPED`, `kind: delete` |
 | `/dashboard` | "Publish report" control is quarantined | `E_DESTRUCTIVE_SKIPPED`, `kind: side_effect` |
 | `/novalidate` | `formnovalidate` on a required form | `E_VALIDATION_NOT_ENFORCED` |
+| `/garbage` | `undefined`/`NaN` in prose, broken image, unhandled rejection, clickable div, focus ring removed | `E_RENDERED_GARBAGE`, `E_BROKEN_IMAGE`, `E_UNHANDLED_REJECTION`, `E_A11Y_SERIOUS`, `E_KEYBOARD_UNREACHABLE`, `E_NO_FOCUS_INDICATOR` |
+| `/trap` | Tab handler that refocuses the field | `E_KEYBOARD_TRAP` (this page only) |
+| `/code-sample` | `undefined`/`NaN` inside `code` and `pre` | none (control) |
+| `/wide` | 700px block | `E_OVERFLOW_X` at 390x800 only |
+| `/orphan` | in `sitemap.xml`, nothing links to it | `E_ORPHAN_ROUTE` |
+| `/admin` | viewer role may load it though `deny` lists it | `E_AUTHZ_REACHABLE` (role `viewer`) |
+| `/throttled` | 429 with `Retry-After: 1`, then 200 | `E_RATE_LIMITED`, not persistent |
 | `/login` | none | — |
 
 `/deck` and `/form-ok` are controls: they must produce **no** finding at all.
