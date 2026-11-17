@@ -62,12 +62,15 @@ falsify = { file = "internal/mcpserver/mcpserver.go", find = "Name: \"inspect_pa
 
 # The canary is the gate. It starts fixtures/canary, runs afford, and asserts
 # every planted defect in fixtures/canary/GROUND_TRUTH.md is found while the
-# control pages stay clean. Ten minutes, so run it with --only canary.
+# control pages stay clean. Measured 2867s on 2026-11-17 with the role replay,
+# page audits and viewport pass in place, so the bound is 5400: a control run
+# over the declared timeout is reported UNPROVEN by --falsify, which is exactly
+# what happened at 1800. Run it alone with --only canary.
 [[gates]]
 name = "canary"
 run = "make canary"
 tier = "default"
-timeout = 1800
+timeout = 5400
 proves = "every planted defect is found, the controls stay clean, and the gate layers (baseline, suppression, permission grants, production guard, 429 retry) behave"
 touches = ["cmd/**", "internal/**", "scripts/canary.sh", "fixtures/**", "sources/**"]
 exits = [0, 1]

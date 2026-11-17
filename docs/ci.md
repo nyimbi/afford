@@ -16,7 +16,7 @@ make ci                    # the same, so the project has one entry point
 
 Every gate declares a `falsify` mutation: a small edit that must make the gate fail. `llocal-ci --falsify` runs the gate on a clean copy first, applies the mutation, and requires a non-zero exit. A gate with no current proof is reported as UNPROVEN, and this repo sets `require_falsification = true` so an unproven gate exits 2 instead of shipping.
 
-`canary` is the slow gate (about ten minutes): it starts `fixtures/canary`, runs afford against it, and asserts every planted defect is found. Run it with `--only canary` while iterating.
+`canary` is the slow gate (about 48 minutes: it starts `fixtures/canary`, runs afford against it, and asserts every planted defect is found. Run it with `--only canary` while iterating.
 
 ### Gating a deployed environment
 
