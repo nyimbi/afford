@@ -27,6 +27,6 @@ Go 1.22+, stdlib plus Playwright-Go. No cgo.
 - `Finding.Key()` includes `viewport` and `role`; add any detail that distinguishes two findings there, or they merge into one with `AlsoOn`.
 - Canary assertions on merged findings must read `also_on`, not just `page_url`.
 - Every screenshot goes through `Config.ScreenshotMasks()` (password inputs always masked).
-- Dockerfile and `.github/actions/afford` are untested; podman only here.
+- CI is `llocal-ci` from `ci.toml` at the repo root; there is no hosted CI and no Dockerfile. Every gate carries a `falsify` mutation, and `require_falsification = true` refuses an unproven gate.
 - MCP run tools (`internal/mcpserver/runs.go`) read `<out>/history.jsonl` and report.json; `get_screenshot` must stay confined to the output directory (`make mcp-smoke` canaries it with `/etc/hosts`).
 - gofmt before committing.

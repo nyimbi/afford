@@ -284,6 +284,8 @@ deny = ["/admin", "/admin/**"]
 
 After the main crawl afford logs in as each profile and loads every page the primary role found that matches `deny`. A page that loads (no login redirect, status below 400, same URL) is `E_AUTHZ_REACHABLE`: the menu hides the route and the server does not. A profile that cannot log in is listed under not-tested, not skipped silently.
 
+Pages that load for both roles but show different controls get `E_ROLE_AFFORDANCE_DIFF` (info): the detail names the control keys only the primary role sees (`only_primary`) and the ones only the profile sees (`only_<role>`). Read it to confirm each role is offered what it should be and nothing more. Pages the profile cannot load at all are counted under not-tested instead.
+
 ### Routes the crawl did not reach
 
 ```toml

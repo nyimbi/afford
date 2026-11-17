@@ -1,4 +1,4 @@
-.PHONY: build test vet canary mcp-smoke install fmt clean
+.PHONY: build test vet canary mcp-smoke ci install fmt clean
 
 build:
 	go build -o bin/afford ./cmd/afford
@@ -17,6 +17,9 @@ canary: build
 
 mcp-smoke: build
 	./scripts/mcp_smoke.sh
+
+ci:
+	llocal-ci --tier default
 
 install:
 	go install ./cmd/afford

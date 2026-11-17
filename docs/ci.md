@@ -3,51 +3,28 @@
 afford is designed to sit after your unit tests and before you call a deploy good.
 The contract is the exit code plus the artifacts, never log scraping.
 
-## GitHub Actions
+## Local CI (`llocal-ci`)
 
-```yaml
-name: ui-smoke
+This repository has no hosted CI. Gates live in `ci.toml` and run on the machine the code is written on:
 
-on:
-  pull_request:
-  deployment_status:
+```sh
+llocal-ci --tier fast      # gofmt, vet, build, tests
+llocal-ci                  # the above plus canary and mcp-smoke
+llocal-ci --only canary    # one gate
+make ci                    # the same, so the project has one entry point
+```
 
-jobs:
-  afford:
-    if: github.event_name == 'pull_request' || github.event.deployment_status.state == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-      - name: Build
-        run: go build -o bin/afford ./cmd/afford
-      - name: Install browser
-        run: ./bin/afford install
-      - name: Smoke the preview deployment
-        env:
-          AFFORD_USERNAME: ${{ secrets.AFFORD_USERNAME }}
-          AFFORD_PASSWORD: ${{ secrets.AFFORD_PASSWORD }}
-        run: |
-          ./bin/afford run \
-            --base-url "${{ steps.deploy.outputs.url }}" \
-            --config afford.toml \
-            --no-prompt \
-            --out artifacts/afford \
-            --fail-on critical \
-            --timeout 900
-      - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: afford-report
-          path: artifacts/afford
-      - name: Publish JUnit
-        if: always()
-        uses: mikepenz/action-junit-report@v4
-        with:
-          report_paths: "artifacts/afford/**/junit.xml"
+Every gate declares a `falsify` mutation: a small edit that must make the gate fail. `llocal-ci --falsify` runs the gate on a clean copy first, applies the mutation, and requires a non-zero exit. A gate with no current proof is reported as UNPROVEN, and this repo sets `require_falsification = true` so an unproven gate exits 2 instead of shipping.
+
+`canary` is the slow gate (about ten minutes): it starts `fixtures/canary`, runs afford against it, and asserts every planted defect is found. Run it with `--only canary` while iterating.
+
+### Gating a deployed environment
+
+`afford run` is the CI step. Point it at a preview URL and gate on the exit code:
+
+```sh
+./bin/afford run --base-url "$PREVIEW_URL" --config afford.toml \
+  --no-prompt --out artifacts/afford --fail-on critical --timeout 900
 ```
 
 ## Exit codes
@@ -84,4 +61,4 @@ delete/erase controls, `--allow-side-effects` for pay/send/publish/logout/approv
 
 ## SARIF
 
-Each run writes `results.sarif` next to `report.json`. Upload it with `github/codeql-action/upload-sarif` to show findings in code scanning. The Dockerfile and `.github/actions/afford` are untested.
+Each run writes `results.sarif` next to `report.json`, for any consumer that reads SARIF 2.1.0.

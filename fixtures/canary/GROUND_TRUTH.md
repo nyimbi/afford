@@ -44,6 +44,9 @@ AFFORD_USERNAME=admin AFFORD_PASSWORD=secret \
 | `/orphan` | in `sitemap.xml`, nothing links to it | `E_ORPHAN_ROUTE` |
 | `/admin` | viewer role may load it though `deny` lists it | `E_AUTHZ_REACHABLE` (role `viewer`) |
 | `/throttled` | 429 with `Retry-After: 1`, then 200 | `E_RATE_LIMITED`, not persistent |
+| `/unstable` | repaints every 50ms (unlinked; its own visual run in the canary) | reported under not-tested as unstable, never `E_VISUAL_DIFF` |
+| `/admin` as viewer | loads for a role whose `deny` lists it | `E_AUTHZ_REACHABLE` |
+| `/dashboard` as viewer | admin-only control absent | `E_ROLE_AFFORDANCE_DIFF`, info |
 | `/login` | none |: |
 
 `/deck` and `/form-ok` are controls: they must produce **no** finding at all.

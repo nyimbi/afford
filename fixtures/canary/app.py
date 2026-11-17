@@ -233,6 +233,22 @@ def overflow() -> str:
 	return page("Overflow", body)
 
 
+@app.get("/unstable", response_class=HTMLResponse)
+def unstable() -> str:
+	# Repaints on a timer, so two captures 400ms apart never agree. The visual
+	# gate must report it as not compared rather than as a diff.
+	body = """
+	<h1>Unstable</h1>
+	<div id="ticker" style="width:200px;height:80px;background:#000"></div>
+	"""
+	script = """<script>
+	let h = 0;
+	setInterval(() => { h = (h + 37) % 360;
+	  document.getElementById('ticker').style.background = 'hsl(' + h + ',80%,50%)'; }, 50);
+	</script>"""
+	return page("Unstable", body, script)
+
+
 @app.get("/unlabeled", response_class=HTMLResponse)
 def unlabeled() -> str:
 	body = """

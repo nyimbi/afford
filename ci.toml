@@ -1,0 +1,74 @@
+# Gates for afford. Local only: there is no .github/workflows and no Dockerfile.
+# CI runs on the machine the code is written on, through llocal-ci.
+#
+# Every gate carries a `falsify` mutation and `require_falsification` makes an
+# unproven gate exit 2, so the repo cannot ship a gate nobody has watched fail.
+# `--falsify` runs the gate on an unmutated copy first (the control), then
+# applies the mutation and requires a non-zero exit.
+
+project = "afford"
+schema_version = 14
+require_falsification = true
+
+[[gates]]
+name = "format"
+run = "test -z \"$(gofmt -l .)\""
+tier = "fast"
+proves = "gofmt has nothing to reformat"
+touches = ["**/*.go"]
+exits = [0, 1]
+falsify = { file = "internal/model/model.go", find = "\treturn strings.Join(parts, \"|\")", replace = "    return strings.Join(parts, \"|\")" }
+
+[[gates]]
+name = "vet"
+run = "go vet ./..."
+tier = "fast"
+proves = "the compiler and vet have nothing to say about the tree"
+touches = ["**/*.go", "go.mod", "go.sum"]
+exits = [0, 1]
+falsify = { file = "internal/model/model.go", find = "\tparts := []string{f.Code, f.Element}", replace = "\tfmt.Printf(\"%d\", \"x\")\n\tparts := []string{f.Code, f.Element}" }
+
+[[gates]]
+name = "build"
+run = "go build ./..."
+tier = "fast"
+proves = "every package compiles"
+touches = ["**/*.go", "go.mod", "go.sum", "sources/**"]
+exits = [0, 1]
+falsify = { file = "internal/model/model.go", find = "\treturn strings.Join(parts, \"|\")", replace = "\treturn strings.Join(parts, \"|\") + missingSymbol" }
+
+[[gates]]
+name = "test"
+run = "go test ./..."
+tier = "fast"
+proves = "the unit tests pass"
+touches = ["**/*.go", "go.mod", "go.sum"]
+exits = [0, 1]
+falsify = { file = "internal/history/history_test.go", find = "\"+2 critical\"", replace = "\"+3 critical\"" }
+
+# The smoke gate exercises the shipped binary over JSON-RPC. It proves the
+# tools list, that every listed tool answers, that an off-origin URL is
+# refused, and that get_screenshot will not serve a path outside the output
+# directory.
+[[gates]]
+name = "mcp-smoke"
+run = "make mcp-smoke"
+tier = "default"
+timeout = 900
+proves = "the binary answers JSON-RPC for all six tools, refuses an off-origin URL and refuses a screenshot path outside the output directory"
+touches = ["cmd/**", "internal/mcpserver/**", "internal/check/**", "internal/run/**", "scripts/mcp_smoke.sh", "fixtures/**"]
+exits = [0, 1]
+falsify = { file = "internal/mcpserver/mcpserver.go", find = "Name: \"inspect_page\"", replace = "Name: \"inspect_page_renamed\"" }
+
+# The canary is the gate. It starts fixtures/canary, runs afford, and asserts
+# every planted defect in fixtures/canary/GROUND_TRUTH.md is found while the
+# control pages stay clean. Ten minutes, so run it with --only canary.
+[[gates]]
+name = "canary"
+run = "make canary"
+tier = "default"
+timeout = 1800
+proves = "every planted defect is found, the controls stay clean, and the gate layers (baseline, suppression, permission grants, production guard, 429 retry) behave"
+touches = ["cmd/**", "internal/**", "scripts/canary.sh", "fixtures/**", "sources/**"]
+exits = [0, 1]
+falsify = { file = "internal/oracles/oracles.go", find = "f := add(\"E_DEAD_CONTROL\")", replace = "f := add(\"E_CONTROL_ERROR\")" }

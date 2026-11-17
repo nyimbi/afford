@@ -140,6 +140,16 @@ if not lim or any(f["detail"].get("still_limited") for f in lim):
     raise SystemExit(f"canary: a 429 that clears on retry must be one non-persistent E_RATE_LIMITED: {[f['detail'] for f in lim]}")
 if not any(p["url"].endswith("/throttled") and p.get("status") == 200 for p in payload["pages"]):
     raise SystemExit("canary: /throttled was not re-fetched after Retry-After")
+axe = [(f["page_url"], f["detail"].get("rule")) for f in payload["findings"]
+       if f["code"] in ("E_A11Y_SERIOUS", "E_A11Y_MINOR")]
+if not any(u.endswith("/garbage") and r == "image-alt" for u, r in axe):
+    raise SystemExit(f"canary: axe did not report image-alt on /garbage: {axe}")
+if not axe:
+    raise SystemExit("canary: axe reported no violation on a page that carries one")
+for code, detail in ((f["code"], f["detail"]) for f in payload["findings"]):
+    if code.startswith("E_A11Y") and not detail.get("rule"):
+        raise SystemExit(f"canary: an a11y finding carries no rule id: {detail}")
+
 orph = [f["page_url"] for f in payload["findings"] if f["code"] == "E_ORPHAN_ROUTE"]
 if [u for u in orph if not u.endswith("/orphan")] or not orph:
     raise SystemExit(f"canary: only /orphan is unlinked but in the sitemap: {orph}")
@@ -174,6 +184,35 @@ if not {"delete", "side_effect"} <= kinds:
 print(f"canary ok: {len(expected)}/{len(expected)} planted defects found, "
       f"permission classes {sorted(kinds)}, popup findings {len(popups)}")
 PY
+# Visual: an animated page must be reported as not compared, not as a diff.
+UNSTABLE_OUT="$(mktemp -d)"
+UNSTABLE_VIS="$(mktemp -d)"
+cat > "$UNSTABLE_OUT/visual.toml" <<TOML
+[run]
+base_url = "http://127.0.0.1:$PORT/unstable"
+depth = "smoke"
+out = "$UNSTABLE_OUT/art"
+[auth]
+mode = "none"
+[visual]
+enabled = true
+dir = "$UNSTABLE_VIS"
+TOML
+./bin/afford run --config "$UNSTABLE_OUT/visual.toml" --no-prompt --quiet --fail-on never --max-pages 1 > "$UNSTABLE_OUT/run.log" 2>&1 || true
+python3 - "$UNSTABLE_OUT/art" <<'PY2'
+import glob, json, sys
+reports = sorted(glob.glob(sys.argv[1] + "/runs/*/report.json"))
+if not reports:
+    raise SystemExit("canary: the visual run wrote no report")
+p = json.load(open(reports[-1]))
+notes = p["summary"].get("not_tested", [])
+if not any("unstable" in n for n in notes):
+    raise SystemExit(f"canary: an animated page was not reported as unstable: {notes}")
+if any(f["code"] == "E_VISUAL_DIFF" for f in p["findings"]):
+    raise SystemExit("canary: an unstable page produced a visual diff finding")
+print("canary ok: an animated page is reported as not compared, not as a diff")
+PY2
+
 
 # The deletion grant must actually be wired, and must not leak into the
 # side-effect class. Seed at /dashboard so the run is short.
