@@ -182,6 +182,20 @@ plant a button in the canary with that attribute and a handler, and assert the
 code. The control is still clicked: it is enabled, so the question is whether the
 app treats it as usable.
 
+## Adding a page audit
+
+A page audit inspects the live page and returns findings, so it belongs in `internal/audit` and is called from `internal/pass` (never from `run` or `check` directly). Steps:
+
+1. Register the code in `specs` in `internal/model/model.go` with a severity, title and why. `NewFinding` panics on an unregistered code.
+2. Write the audit as a function returning `[]model.Finding`. Return nothing on an evaluation error; record coverage instead of guessing.
+3. Add a config switch only if the audit is slow or noisy (`a11y`, `keyboard` are the precedent).
+4. Plant the defect on a page in `fixtures/canary/app.py`, plus a control page that must stay clean (`/code-sample` for text leakage). Assert both in `scripts/canary.sh` and list the page in `GROUND_TRUTH.md`.
+5. If two findings differ only by a detail (viewport, role), add that detail name to `Finding.Key()` or they merge into one finding with `also_on`. Canary assertions on merged findings read `also_on` as well as `page_url`.
+
+## Adding an extra pass
+
+Passes that revisit pages (viewports, roles, routes) live in `internal/run/extras.go`. They load and scan but never click, so they cannot violate the mutation grants. Record every page they cannot evaluate under not-tested with a reason.
+
 ## Adding a field type or payload
 
 Field classification lives in `payloads.InferKind`, which prefers the declared

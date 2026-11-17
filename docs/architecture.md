@@ -57,6 +57,14 @@ not finished.
 | `internal/visual` | Baseline store and pixel diff. | `config` |
 | `internal/check` | Single-page checker: context, capture, probes, popup and visual findings. | `auth`, `browser`, `config`, `discover`, `model`, `oracles`, `payloads`, `probe`, `sanitize`, `visual` |
 | `internal/run` | Wave crawl, link audit, findings orchestration, summary. | `check`'s siblings, `store`, `report`, `visual` |
+| `internal/audit` | Page-level oracles that need the live page: rendered text, broken images, rejections, embedded axe-core, the Tab pass. Findings only; severity comes from the catalogue. | `model`, `sources`, playwright-go |
+| `internal/pass` | The page capture shared by `run` and `check`, so the two cannot diverge. Calls `audit`. | `audit`, `browser`, `discover`, `model`, `oracles`, `probe` |
+| `internal/routes` | Sitemap, robots, Next manifest and configured routes, resolved against the base origin and dropped if they leave it. | `config` |
+| `internal/fixtures` | Operator setup and teardown commands with `AFFORD_RUN_ID`. | `config` |
+| `internal/history` | `history.jsonl`: one line per run, previous-run lookup, delta text. | `model` |
+| `internal/sarif` | SARIF 2.1.0 writer. | `model` |
+| `internal/gate` | Confirm, policy, suppression and baseline layers; decides which findings gate. | `config`, `model` |
+| `sources` | Archived third-party code (axe-core) embedded with `go:embed`, and `INDEX.md`. | none |
 | `internal/store` | Append-only JSONL log and in-memory replay. | `model` |
 | `internal/report` | HTML, JSON, JUnit and Markdown writers. | `model`, `store` |
 | `internal/mcpserver` | MCP tools, lazy browser and session, tool schemas. | `check`, `run`, `report`, `store`, `auth`, `browser` |
@@ -508,6 +516,16 @@ differs across operating systems, so a baseline produced on macOS will fail on
 Linux for reasons unrelated to the application. The docs say to seed and compare
 in the same environment.
 
+## Extra passes
+
+After the link crawl, `internal/run/extras.go` runs passes that load pages but never click:
+
+1. **Orphan routes.** `routes.Enumerate` names routes the app declares. Those the crawl did not reach get `E_ORPHAN_ROUTE`, then are crawled like any other page.
+2. **Viewports.** Each page the crawl visited is reloaded in a context sized by `[run] viewports`. The pass records overflow (detail `viewport`) and a per-viewport screenshot compared against a baseline keyed by template and size.
+3. **Roles.** For each `[[auth.profiles]]` entry the runner authenticates, loads every visited page in that session and compares what loads. A `deny` match that loads is `E_AUTHZ_REACHABLE`. A page that loads for both roles with different visible controls gets `E_ROLE_AFFORDANCE_DIFF`, comparing `tag[type] name` keys.
+
+Primary-role affordances are recorded in `Runner.affordance` during the main visit; the role pass reads them, so it adds no second primary scan. A page the profile cannot load (login redirect, 4xx) is counted under not-tested, not reported as a difference.
+
 ## Concurrency and failure handling
 
 The crawler uses one goroutine per URL in the current wave, bounded by a pool of
@@ -524,6 +542,10 @@ A panic inside a page visit is caught in the worker and recorded as
 `[run] timeout_secs` deadline stops the next wave and records the remaining
 frontier as not tested. A browser launch failure or an authentication failure ends
 the run with exit code 3 before any report claims success.
+
+## Screenshot privacy
+
+Every screenshot path calls `Config.ScreenshotMasks()`: password inputs always, then `[privacy] mask`, then `[visual] mask`. There is no unmasked capture path; a new caller of `browser.Screenshot` must take its masks from that method.
 
 ## False-clean guards
 

@@ -123,6 +123,7 @@ def login(username: str = Form(...), password: str = Form(...)) -> Response:
 		sid = uuid.uuid4().hex
 		SESSIONS.add(sid)
 		response.set_cookie("sid", sid, httponly=True, samesite="lax")
+		response.set_cookie("role", username, samesite="lax")
 		return response
 	return HTMLResponse(
 		page("Sign in", "<h1>Sign in</h1><p class='error'>Invalid credentials</p>" + login_form()),
@@ -153,6 +154,8 @@ def dashboard(request: Request) -> Response:
 	  <button type="submit">Create order</button>
 	</form>
 	"""
+	if request.cookies.get("role") == "admin":
+		body += "<p><button type='button' onclick=\"document.title='admin'\">Admin-only action</button></p>"
 	return HTMLResponse(page("Dashboard", body))
 
 

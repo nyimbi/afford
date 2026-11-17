@@ -12,12 +12,12 @@ go build -o bin/afford ./cmd/afford
 
 Output per run, under `.afford/runs/<run-id>/`:
 
-- `report.html` — findings, evidence, and a screenshot of every page
-- `report.json` — the same data for machines
-- `junit.xml` — for CI test reporters
-- `summary.md` — a short Markdown digest
-- `run.jsonl` — the append-only event log the report is built from
-- `screenshots/` — full-page PNG per page
+- `report.html`: findings, evidence, and a screenshot of every page
+- `report.json`: the same data for machines
+- `junit.xml`: for CI test reporters
+- `summary.md`: a short Markdown digest
+- `run.jsonl`: the append-only event log the report is built from
+- `screenshots/`: full-page PNG per page
 
 ## What it does
 
@@ -25,21 +25,21 @@ For each reachable page it captures console errors, uncaught exceptions, 4xx/5xx
 responses, failed requests, blank renders, framework error screens and horizontal
 overflow. Then, from a fresh load each time, it clicks every enabled control and
 classifies what happened: `navigated`, `dialog`, `dom`, `network`, `popup`, or
-**`none`** — a no-op on an enabled button is the highest-value finding the tool
+**`none`**: a no-op on an enabled button is the highest-value finding the tool
 produces. Inputs are filled with a battery derived from the field's own declared
 type and constraints; forms are submitted once empty-required and once with valid
 values.
 
 Dropdowns are audited: an option whose visible label is a UUID or ULID is reported,
 as are UUID option values and a select with nothing to choose. Links are checked by
-clicking them, so both 4xx/5xx targets and SPA "soft 404s" — HTTP 200 with "page not
-found" text — are caught, and every link the crawler refuses is listed with its reason
+clicking them, so both 4xx/5xx targets and SPA "soft 404s": HTTP 200 with "page not
+found" text: are caught, and every link the crawler refuses is listed with its reason
 in **Links not crawled**.
 
 File inputs are exercised with a real file: a fixture from `[uploads]`, or a small valid
 file synthesized to match the input's `accept` attribute. Change handlers, client
-validation and the submit path all run. Pages opened in a new tab are captured too —
-status, console errors, overflow, screenshot — and attributed to the control that opened
+validation and the submit path all run. Pages opened in a new tab are captured too:
+status, console errors, overflow, screenshot, and attributed to the control that opened
 them. Every page gets a full-page screenshot and two timings:
 the browser load event, and the settled time when afford's quiet-network and
 quiet-DOM criteria are met.
@@ -53,7 +53,7 @@ severity, code, what it means, the page, the control, and the payload or effect 
 produced it. Expanding a row shows *why* the check matters, the console/HTTP evidence,
 the structured detail, every other page carrying the same defect, and a popup
 screenshot where one exists. Below that: a filterable page table (thumbnail, status,
-load, settled, controls, probes, findings — clicking a count filters the findings),
+load, settled, controls, probes, findings: clicking a count filters the findings),
 visual diffs side by side, **Links not crawled** with reasons, and an explicit list of
 what was not tested. `afford checks` prints every check the tool performs.
 
@@ -107,10 +107,10 @@ dir = ".afford/baselines"
 
 A baseline is an artefact of one browser on one platform. Font rendering and
 antialiasing differ across machines, so generate and compare baselines in the same
-image — a container in CI is the usual answer. Mask anything that legitimately changes
+image: a container in CI is the usual answer. Mask anything that legitimately changes
 between runs; a visual gate that cries wolf gets switched off.
 
-## MCP — let an agent check one page
+## MCP: let an agent check one page
 
 ```sh
 afford mcp --config afford.toml      # stdio; no browser starts until the first call
@@ -133,11 +133,11 @@ Clicks mutate state. Creation is governed by form submission; deletion and other
 irreversible actions are separate, explicit grants, and every skipped control is
 reported so coverage stays honest.
 
-- `--allow-delete` — click controls that delete or erase data
-- `--allow-side-effects` — click pay/send/publish/approve/logout controls
-- `--allow-destructive` — both grants at once, on a disposable environment only
-- `--no-submit` — fill and validate without ever submitting a form
-- `--max-pages`, `--max-depth`, `--timeout` — hard budgets
+- `--allow-delete`: click controls that delete or erase data
+- `--allow-side-effects`: click pay/send/publish/approve/logout controls
+- `--allow-destructive`: both grants at once, on a disposable environment only
+- `--no-submit`: fill and validate without ever submitting a form
+- `--max-pages`, `--max-depth`, `--timeout`: hard budgets
 - Links off-origin or excluded by `[scope]` are recorded, never followed
 
 ## CI
@@ -173,8 +173,8 @@ The Dockerfile and the composite GitHub Action are untested; they need a machine
 
 `afford init` writes a starter `afford.toml`; every key is documented in
 `cmd/afford/main.go` usage and `internal/config/config.go`. The interesting knobs
-are `[run] depth` (`smoke` — one payload per input; `standard` — boundaries and
-unicode; `deep` — injection sentinels), `[limits] concurrency`, `[uploads]` for file
+are `[run] depth` (`smoke`: one payload per input; `standard`: boundaries and
+unicode; `deep`: injection sentinels), `[limits] concurrency`, `[uploads]` for file
 fixtures, `[popups] mode` (`capture` or `off`), `[visual]`, and the `[safety]` grants.
 
 ## Documentation

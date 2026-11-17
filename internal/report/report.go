@@ -171,8 +171,8 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 
 	b.WriteString("<!doctype html><html lang='en'><head><meta charset='utf-8'>")
 	b.WriteString("<meta name='viewport' content='width=device-width,initial-scale=1'>")
-	fmt.Fprintf(&b, "<title>afford — %s</title><style>%s</style></head><body><main>", esc(p.Summary.BaseURL), css)
-	fmt.Fprintf(&b, "<h1>afford — %s</h1>", esc(p.Summary.BaseURL))
+	fmt.Fprintf(&b, "<title>afford: %s</title><style>%s</style></head><body><main>", esc(p.Summary.BaseURL), css)
+	fmt.Fprintf(&b, "<h1>afford: %s</h1>", esc(p.Summary.BaseURL))
 	fmt.Fprintf(&b, "<div class='meta'>run <code>%s</code> · started %s · finished %s</div>",
 		esc(p.Summary.RunID),
 		esc(p.Summary.StartedAt.Format(time.RFC3339)),
@@ -239,7 +239,7 @@ func buildHTML(p Payload, baseDir string, embed bool) string {
 	if len(gating) > 8 {
 		b.WriteString("<div class='start'><h2>Start here</h2><ol>")
 		for _, f := range gating[:3] {
-			fmt.Fprintf(&b, "<li><code>%s</code> %s — <a href='%s'>%s</a>",
+			fmt.Fprintf(&b, "<li><code>%s</code> %s: <a href='%s'>%s</a>",
 				esc(f.Code), esc(f.Title), esc(f.PageURL), esc(f.PageURL))
 			if first := firstEvidence(f); first != "" {
 				fmt.Fprintf(&b, "<div class='meta'>%s</div>", esc(first))
@@ -610,7 +610,7 @@ func percentile(sorted []int64, p int) int64 {
 
 func loadLabel(ms int64) string {
 	if ms <= 0 {
-		return "—"
+		return "-"
 	}
 	return fmt.Sprintf("%d ms", ms)
 }
@@ -741,7 +741,7 @@ func junit(p Payload) string {
 
 func markdown(p Payload) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# afford — %s\n\n", p.Summary.BaseURL)
+	fmt.Fprintf(&b, "# afford: %s\n\n", p.Summary.BaseURL)
 	fmt.Fprintf(&b, "Run `%s` · %s → %s\n\n",
 		p.Summary.RunID,
 		p.Summary.StartedAt.Format(time.RFC3339),
@@ -773,9 +773,9 @@ func markdown(p Payload) string {
 		if f.Confidence == "unconfirmed" {
 			tag += " [unconfirmed]"
 		}
-		fmt.Fprintf(&b, "- **%s** `%s`%s %s — %s", f.Severity, f.Code, tag, f.Title, f.PageURL)
+		fmt.Fprintf(&b, "- **%s** `%s`%s %s: %s", f.Severity, f.Code, tag, f.Title, f.PageURL)
 		if f.Element != "" {
-			fmt.Fprintf(&b, " — %s", f.Element)
+			fmt.Fprintf(&b, ": %s", f.Element)
 		}
 		b.WriteString("\n")
 	}

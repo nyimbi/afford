@@ -25,7 +25,7 @@ never from tool arguments (those land in the host's transcript).
 
 Every result carries `structuredContent` (findings sorted worst-first, counts, probe
 counts, `load_ms`, `settled_ms`, screenshot path) and a short text digest an agent can
-read directly. Each digest line includes the element and the first evidence line —
+read directly. Each digest line includes the element and the first evidence line:
 `HTTP 500: POST /orders`, not just the finding's title. `crawl_site` also returns
 `skipped_links` (capped at 50), `link_counts`, and the five slowest pages.
 `load_ms` is the browser's load event; `settled_ms` is when the page stopped changing
@@ -90,8 +90,8 @@ An agent does not get a wider blast radius than a human running the CLI:
 
 ## Recommended agent flow
 
-1. `inspect_page` — cheap, no mutation. If the page does not render, stop; the rest is noise.
-2. `check_page` with defaults — clicks controls, fills inputs, does not submit.
+1. `inspect_page`: cheap, no mutation. If the page does not render, stop; the rest is noise.
+2. `check_page` with defaults: clicks controls, fills inputs, does not submit.
 3. `check_page` with `submit: true` only on an environment whose data can be thrown away.
 4. `crawl_site` when the question is about the app rather than one page.
 
@@ -104,7 +104,7 @@ evidence is what makes a finding checkable, and a finding without evidence is a 
 |---|---|
 | `afford is not authenticated: credentials not found: set …` | server launched without credentials in its environment |
 | `refusing to open http://…: it is neither the configured origin …` | URL outside the allowlist |
-| `could not open http://…: …` | navigation failed — DNS, TLS, or the app is down |
+| `could not open http://…: …` | navigation failed: DNS, TLS, or the app is down |
 | `depth must be smoke, standard or deep` | bad argument |
 
 ## Run history and screenshots

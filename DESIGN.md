@@ -1,4 +1,4 @@
-# afford — design
+# afford: design
 
 Crawl a running web app, exercise every interactive affordance, and report what breaks.
 Unit tests prove functions; this proves the wiring a user actually touches.
@@ -12,7 +12,7 @@ CI image by copying one file.
 ## The problem, stated precisely
 
 "Test every input and every button" is underdetermined. Nothing about a click tells you
-whether the result was *correct* — only whether something happened, whether it crashed, and
+whether the result was *correct*: only whether something happened, whether it crashed, and
 whether the app told the user. A tool that guesses at semantics produces reports nobody
 trusts, and an untrusted report is worse than none because it burns the attention that would
 have found the real bug.
@@ -32,12 +32,12 @@ is undecidable, so the tool enumerates *routes* and samples *states*, and then r
 own coverage explicitly. A run that says "41 of 47 discovered routes exercised" is useful; a
 run that implies totality is lying.
 
-- **Identity**: normalized URL — fragment dropped, tracking params stripped, query sorted.
+- **Identity**: normalized URL: fragment dropped, tracking params stripped, query sorted.
 - **Template**: path segments matching UUID / integer / long hex become `{id}`, so
   `/orders/1042` and `/orders/881` are one page with two instances.
 - **Instances**: at most `max_instances_per_template` (default 3), discovered by the crawl.
 - **Reachability**: recorded as an edge with the mechanism (`href`, `form`, `click`), because
-  a page reachable only by clicking is a page with no deep link — itself a finding.
+  a page reachable only by clicking is a page with no deep link: itself a finding.
 
 ## Discovery: the union of three graphs
 
@@ -54,8 +54,8 @@ the frontier, which is the only way to walk a React/Vue app whose links are all 
 
 Inputs are classified by declared type, then by name/label/placeholder semantics. Each class
 gets a payload battery: empty, whitespace, boundary (below min, above max), overflow length,
-malformed-by-type (`not-an-email`, `2024-02-30`, `abc` for `number`), unicode, and — in
-`deep` mode only — an XSS sentinel whose *reflection is detected by the dialog it fires*,
+malformed-by-type (`not-an-email`, `2024-02-30`, `abc` for `number`), unicode, and: in
+`deep` mode only: an XSS sentinel whose *reflection is detected by the dialog it fires*,
 not assumed.
 
 The sweep is navigation-free: fill, blur, read `validity`, `validationMessage`, and any
@@ -136,7 +136,7 @@ fixture is `E_UPLOAD_FAILED`, not silence.
 **Popups.** After an action, extra pages in the context are settled, scanned,
 screenshotted and closed; their observations are attached to the opener's finding with
 `popup_url` and `screenshot`. The collector is bound after the popup exists, so console
-output emitted before it is missed — an accepted limitation of polling the context rather
+output emitted before it is missed: an accepted limitation of polling the context rather
 than subscribing per probe.
 
 **Visual regression.** Baselines are keyed by route template and viewport, so detail-page
@@ -162,28 +162,28 @@ targets or different element names.
 `afford run` is a gate, so the exit code is part of the interface: `0` clean, `1` findings
 at or above `--fail-on`, `2` usage/config, `3` the run could not complete. Artifacts are
 written before the code is decided, including on partial runs. A crawl that captured zero
-pages exits 3 — the false-clean case is the one this tool must never ship. `--timeout` is a
+pages exits 3: the false-clean case is the one this tool must never ship. `--timeout` is a
 wall clock; `--no-prompt` turns missing credentials into a failure instead of a hang.
 
 ## Rejected options
 
-- **Selenium** — no auto-wait, no tracing, no storage-state; the flake budget is worse.
-- **Cypress** — JS-only, cross-origin and multi-tab limitations, weak crawl ergonomics.
-- **Puppeteer** — no Python, no test-runner or trace artifacts.
-- **Raw CDP** — reimplements what Playwright already stabilised.
-- **LLM-driven agent exploration as the default loop** — non-reproducible, costly per page,
+- **Selenium**: no auto-wait, no tracing, no storage-state; the flake budget is worse.
+- **Cypress**: JS-only, cross-origin and multi-tab limitations, weak crawl ergonomics.
+- **Puppeteer**: no Python, no test-runner or trace artifacts.
+- **Raw CDP**: reimplements what Playwright already stabilised.
+- **LLM-driven agent exploration as the default loop**: non-reproducible, costly per page,
   and it cannot tell you *why* a click did nothing. Kept as an optional later adapter for
   naming findings, never for the verdict.
-- **Record-and-replay (Playwright codegen)** — tests the happy path you already know; this
+- **Record-and-replay (Playwright codegen)**: tests the happy path you already know; this
   tool is for the paths you do not.
 
 ## Roadmap
 
-- v0.2 — route-manifest adapters (Next.js/React Router/Nuxt), OpenAPI-driven valid payloads,
+- v0.2: route-manifest adapters (Next.js/React Router/Nuxt), OpenAPI-driven valid payloads,
   multi-role crawl (same run as admin/anon/user, diff the affordance sets).
-- v0.3 — run-to-run diff of findings (new/fixed, not just visual), axe-core a11y pass,
+- v0.3: run-to-run diff of findings (new/fixed, not just visual), axe-core a11y pass,
   trace zip per failure.
-- v0.4 — click-path replay for pages that cannot be deep-linked; interaction inside popups.
+- v0.4: click-path replay for pages that cannot be deep-linked; interaction inside popups.
 
 ## Added after the first release
 

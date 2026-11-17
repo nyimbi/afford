@@ -130,6 +130,11 @@ clean = [f for f in payload["findings"] if f["code"].startswith(("E_KEYBOARD", "
 if clean:
     raise SystemExit(f"canary: keyboard findings on a page that tabs cleanly: {[(f['code'], f.get('element')) for f in clean]}")
 
+diffs = [f for f in payload["findings"] if f["code"] == "E_ROLE_AFFORDANCE_DIFF"]
+if not any(f["page_url"].endswith("/dashboard") and any("Admin-only action" in x for x in f["detail"].get("only_primary", [])) for f in diffs):
+    raise SystemExit(f"canary: no affordance diff between admin and viewer: {[f['page_url'] for f in diffs]}")
+if any(f["detail"].get("role") != "viewer" for f in diffs):
+    raise SystemExit("canary: affordance diff attributed to the wrong role")
 lim = [f for f in payload["findings"] if f["code"] == "E_RATE_LIMITED"]
 if not lim or any(f["detail"].get("still_limited") for f in lim):
     raise SystemExit(f"canary: a 429 that clears on retry must be one non-persistent E_RATE_LIMITED: {[f['detail'] for f in lim]}")

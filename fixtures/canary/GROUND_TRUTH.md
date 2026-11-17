@@ -44,7 +44,7 @@ AFFORD_USERNAME=admin AFFORD_PASSWORD=secret \
 | `/orphan` | in `sitemap.xml`, nothing links to it | `E_ORPHAN_ROUTE` |
 | `/admin` | viewer role may load it though `deny` lists it | `E_AUTHZ_REACHABLE` (role `viewer`) |
 | `/throttled` | 429 with `Retry-After: 1`, then 200 | `E_RATE_LIMITED`, not persistent |
-| `/login` | none | — |
+| `/login` | none |: |
 
 `/deck` and `/form-ok` are controls: they must produce **no** finding at all.
 
@@ -57,4 +57,4 @@ If the run reports zero findings, check in this order:
 2. Did the crawler reach `/crash`? The nav links to it, so a missing page is a
    discovery bug.
 3. Did `/` produce `E_DEAD_CONTROL`? If not, the action probe classified a no-op as
-   something else — inspect `effect` on the probe row.
+   something else: inspect `effect` on the probe row.

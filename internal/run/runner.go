@@ -87,7 +87,8 @@ type Runner struct {
 	reauthDone map[string]bool   // page URL → it already had its one retry
 	unstable   map[string]string // page URL → why two captures disagreed
 	rateLimits int
-	pagesSeen  []string // URLs visited, for viewport and role passes
+	affordance map[string][]string // page URL → sorted visible control keys, primary role
+	pagesSeen  []string            // URLs visited, for viewport and role passes
 }
 
 func New(cfg config.Config, st *store.Store, runID, baseDir string, ctx context.Context) *Runner {
@@ -96,7 +97,7 @@ func New(cfg config.Config, st *store.Store, runID, baseDir string, ctx context.
 		seen: map[string]bool{}, templateCounts: map[string]int{},
 		notTested: map[string]int{}, skipped: map[string]int{},
 		reauthFlag: map[string]bool{}, reauthDone: map[string]bool{},
-		unstable: map[string]string{},
+		unstable: map[string]string{}, affordance: map[string][]string{},
 	}
 	runner.visitPage = runner.visit
 	return runner
@@ -330,6 +331,7 @@ func (r *Runner) visit(bctx playwright.BrowserContext, item Item) []found {
 	if !authRedirect && load.OK {
 		r.mu.Lock()
 		r.pagesSeen = append(r.pagesSeen, url)
+		r.affordance[url] = controlKeys(scanResult.Controls)
 		r.mu.Unlock()
 	}
 	if load.ScrollTruncated {

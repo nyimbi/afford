@@ -135,6 +135,8 @@ var specs = []FindingSpec{
 		"The route is named by the sitemap, a framework manifest or the configured list, but the link crawl never reached it. It is either dead, or reachable only by typing the URL."},
 	{"E_RATE_LIMITED", Minor, "Server rate-limited the crawl",
 		"The server answered 429. afford backed off and retried, but pages measured under throttling may be incomplete; lower [limits] concurrency."},
+	{"E_ROLE_AFFORDANCE_DIFF", Info, "Controls differ between roles on this page",
+		"The primary role and this profile see different controls here. Expected for role-based UI; read it to confirm each role sees what it should and nothing more."},
 	{"E_AUTHZ_REACHABLE", Critical, "A route declared off-limits to this role loaded",
 		"A role profile lists this route under deny, and a request made with that role's session received the page. Authorization is enforced by the menu, not the server."},
 	{"E_OUT_OF_SCOPE", Info, "Link outside scope not followed",
