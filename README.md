@@ -1,10 +1,12 @@
 # afford
 
-Crawl a running web app, use every control it offers, and report what breaks.
+**Find the buttons that do nothing.**
 
-Unit tests prove functions work. afford proves the wiring a person touches: the
-button that does nothing, the link that 404s, the form whose submit throws, the
-image that never loads, the menu the keyboard cannot reach.
+afford drives a real browser through your running web app, uses every control it
+can reach, and reports the ones that break: the button with no handler, the link
+that 404s, the form whose submit throws, the image that never loads, the menu the
+keyboard cannot reach. One run gives you an HTML report with a screenshot of every
+page, JSON, JUnit, SARIF, and an exit code CI can gate on.
 
 ```sh
 go install github.com/nyimbi/afford/cmd/afford@latest
@@ -12,6 +14,10 @@ afford install                              # once: fetch the Playwright browser
 afford init --base-url http://localhost:3000
 afford run --config afford.toml
 ```
+
+Prebuilt binaries for Linux (x86-64, arm64), macOS (Intel, Apple silicon) and
+Windows (x86-64) are on the [releases page](https://github.com/nyimbi/afford/releases),
+with SHA-256 checksums.
 
 ## Why
 
@@ -22,9 +28,17 @@ and records what happened to each action. An action that completes with no
 navigation, no dialog, no DOM change and no request is a finding, and on most
 codebases it is the highest-value one the tool produces.
 
-Prebuilt binaries for Linux (x86-64, arm64), macOS (Intel, Apple silicon) and
-Windows (x86-64) are on the [releases page](https://github.com/nyimbi/afford/releases),
-with SHA-256 checksums.
+It is built to survive a real codebase:
+
+- A no-op is re-probed before it is called a defect, so a flaky click does not
+  wake anyone up.
+- Runs gate on **new** findings against an accepted baseline, so the suite stays
+  green until something actually changes.
+- Every skip is reported: disabled, over budget, off-origin, cross-origin frame.
+  A clean report from a crawl that saw nothing is the failure this tool exists to
+  prevent.
+- Credentials never enter argv or the report, and password fields are masked in
+  every screenshot.
 
 ## Requirements
 
