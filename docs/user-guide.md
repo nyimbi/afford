@@ -207,7 +207,7 @@ See [Gating on what changed](#gating-on-what-changed).
 | `max_instances_per_template` | `3` | How many instances of `/orders/{id}` to visit. |
 | `max_controls_per_page` | `80` | Cap on controls activated per page. |
 | `max_forms_per_page` | `8` | Cap on forms probed per page. |
-| `concurrency` | `3` | Worker contexts. Each worker has its own browser context. |
+| `concurrency` | `3` | Worker contexts, under `[limits]`. Each worker has its own browser context. A key in the wrong table is refused by name. |
 | `navigation_timeout_ms` | `15000` | Navigation timeout. |
 | `probe_timeout_ms` | `8000` | Click, fill and submit timeout. |
 | `settle_ms` | `1200` | Network settling budget. |

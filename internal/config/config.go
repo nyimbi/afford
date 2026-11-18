@@ -334,8 +334,19 @@ func Default() Config {
 func Load(path string) (Config, error) {
 	cfg := Default()
 	if path != "" {
-		if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		md, err := toml.DecodeFile(path, &cfg)
+		if err != nil {
 			return cfg, fmt.Errorf("read %s: %w", path, err)
+		}
+		// A key in the wrong table is a setting that reads as applied and is
+		// not: `[run] concurrency` was inert for months because the field lives
+		// under [limits]. Refuse it by name instead of silently ignoring it.
+		if keys := md.Undecoded(); len(keys) > 0 {
+			names := make([]string, 0, len(keys))
+			for _, k := range keys {
+				names = append(names, k.String())
+			}
+			return cfg, fmt.Errorf("%s: unknown key(s): %s", path, strings.Join(names, ", "))
 		}
 	}
 	return cfg, cfg.Validate()

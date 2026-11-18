@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestPermitsIsClassBased(t *testing.T) {
 	none := Default()
@@ -55,5 +59,19 @@ func TestValidateRejectsBadValues(t *testing.T) {
 	cfg.Limits.Concurrency = 0
 	if err := cfg.Validate(); err == nil {
 		t.Error("zero concurrency should be rejected")
+	}
+}
+
+func TestUnknownKeyIsRefusedByName(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/afford.toml"
+	// concurrency belongs under [limits]; under [run] it used to be ignored.
+	blob := "run_base_url = \"http://x\"\n[run]\nbase_url = \"http://127.0.0.1:1\"\nconcurrency = 2\n"
+	if err := os.WriteFile(path, []byte(blob), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "run.concurrency") {
+		t.Fatalf("a key in the wrong table must be refused by name: %v", err)
 	}
 }
