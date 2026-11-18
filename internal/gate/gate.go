@@ -19,9 +19,9 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"afford/internal/config"
-	"afford/internal/discover"
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/discover"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 // Rule is one suppression. Reason, owner and expiry are mandatory: a

@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 var errorBoundary = regexp.MustCompile(`(?i)application error|client-side exception|something went wrong|` +

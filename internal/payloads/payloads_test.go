@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 func el(tag, name, typ, nameAttr string) model.Element {

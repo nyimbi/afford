@@ -14,9 +14,9 @@ import (
 	"github.com/mxschmitt/playwright-go"
 	"golang.org/x/term"
 
-	"afford/internal/browser"
-	"afford/internal/config"
-	"afford/internal/discover"
+	"github.com/nyimbi/afford/internal/browser"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/discover"
 )
 
 type Credentials struct {

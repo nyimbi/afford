@@ -6,7 +6,7 @@ package sarif
 import (
 	"encoding/json"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 type log struct {
@@ -122,7 +122,7 @@ func Render(findings []model.Finding, version string) ([]byte, error) {
 			},
 		}
 		if f.Fingerprint != "" {
-			r.Fingerprints = map[string]string{"afford/v1": f.Fingerprint}
+			r.Fingerprints = map[string]string{"github.com/nyimbi/afford/v1": f.Fingerprint}
 		}
 		switch f.Status {
 		case "new":

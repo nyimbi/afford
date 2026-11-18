@@ -17,17 +17,17 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
-	"afford/internal/auth"
-	"afford/internal/browser"
-	"afford/internal/config"
-	"afford/internal/fixtures"
-	"afford/internal/gate"
-	"afford/internal/history"
-	"afford/internal/mcpserver"
-	"afford/internal/model"
-	"afford/internal/report"
-	"afford/internal/run"
-	"afford/internal/store"
+	"github.com/nyimbi/afford/internal/auth"
+	"github.com/nyimbi/afford/internal/browser"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/fixtures"
+	"github.com/nyimbi/afford/internal/gate"
+	"github.com/nyimbi/afford/internal/history"
+	"github.com/nyimbi/afford/internal/mcpserver"
+	"github.com/nyimbi/afford/internal/model"
+	"github.com/nyimbi/afford/internal/report"
+	"github.com/nyimbi/afford/internal/run"
+	"github.com/nyimbi/afford/internal/store"
 )
 
 const version = "0.1.0"

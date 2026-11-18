@@ -5,7 +5,7 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 // focusProbeJS describes the focused element and whether its focus is visible:

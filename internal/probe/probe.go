@@ -13,13 +13,13 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
-	"afford/internal/browser"
-	"afford/internal/config"
-	"afford/internal/discover"
-	"afford/internal/model"
-	"afford/internal/payloads"
-	"afford/internal/sanitize"
-	"afford/internal/uploads"
+	"github.com/nyimbi/afford/internal/browser"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/discover"
+	"github.com/nyimbi/afford/internal/model"
+	"github.com/nyimbi/afford/internal/payloads"
+	"github.com/nyimbi/afford/internal/sanitize"
+	"github.com/nyimbi/afford/internal/uploads"
 )
 
 type Load struct {

@@ -19,17 +19,17 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
-	"afford/internal/auth"
-	"afford/internal/browser"
-	"afford/internal/config"
-	"afford/internal/discover"
-	"afford/internal/gate"
-	"afford/internal/model"
-	"afford/internal/oracles"
-	"afford/internal/pass"
-	"afford/internal/payloads"
-	"afford/internal/probe"
-	"afford/internal/visual"
+	"github.com/nyimbi/afford/internal/auth"
+	"github.com/nyimbi/afford/internal/browser"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/discover"
+	"github.com/nyimbi/afford/internal/gate"
+	"github.com/nyimbi/afford/internal/model"
+	"github.com/nyimbi/afford/internal/oracles"
+	"github.com/nyimbi/afford/internal/pass"
+	"github.com/nyimbi/afford/internal/payloads"
+	"github.com/nyimbi/afford/internal/probe"
+	"github.com/nyimbi/afford/internal/visual"
 )
 
 type Options struct {

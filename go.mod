@@ -1,4 +1,4 @@
-module afford
+module github.com/nyimbi/afford
 
 go 1.27.4
 

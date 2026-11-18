@@ -17,8 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"afford/internal/config"
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 type File struct {

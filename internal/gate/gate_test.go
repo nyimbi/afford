@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"afford/internal/config"
-	"afford/internal/discover"
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/discover"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 var now = time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)

@@ -5,7 +5,7 @@ points at a URL that has moved.
 
 | file | what | version | licence | origin | retrieved |
 |---|---|---|---|---|---|
-| `axe.min.js` | axe-core accessibility rule engine, embedded and injected by `internal/pass` | 4.10.2 | MPL-2.0 | https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js | 2026-11-15 |
+| `axe.min.js` | axe-core accessibility rule engine, embedded and injected by `internal/audit` | 4.10.2 | MPL-2.0 | https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js | 2026-11-15 |
 
 axe-core is distributed under the Mozilla Public License 2.0. The file is shipped
 unmodified; its licence header is retained in the file. Upstream:

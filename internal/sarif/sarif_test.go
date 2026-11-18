@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 func TestRenderMapsLevelsAndState(t *testing.T) {
@@ -44,7 +44,7 @@ func TestRenderMapsLevelsAndState(t *testing.T) {
 	if doc.Version != "2.1.0" || len(r) != 3 {
 		t.Fatalf("bad document: %s", blob)
 	}
-	if r[0].Level != "error" || r[0].BaselineState != "new" || r[0].Fingerprints["afford/v1"] != "abc123" {
+	if r[0].Level != "error" || r[0].BaselineState != "new" || r[0].Fingerprints["github.com/nyimbi/afford/v1"] != "abc123" {
 		t.Errorf("new critical finding: %+v", r[0])
 	}
 	if r[1].Level != "note" || len(r[1].Suppressions) != 1 {

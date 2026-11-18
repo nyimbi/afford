@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"afford/internal/model"
-	"afford/internal/sarif"
-	"afford/internal/store"
+	"github.com/nyimbi/afford/internal/model"
+	"github.com/nyimbi/afford/internal/sarif"
+	"github.com/nyimbi/afford/internal/store"
 )
 
 type Payload struct {

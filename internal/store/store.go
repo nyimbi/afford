@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 type event struct {

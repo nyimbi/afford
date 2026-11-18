@@ -13,11 +13,11 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
-	"afford/internal/audit"
-	"afford/internal/config"
-	"afford/internal/discover"
-	"afford/internal/model"
-	"afford/internal/sanitize"
+	"github.com/nyimbi/afford/internal/audit"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/discover"
+	"github.com/nyimbi/afford/internal/model"
+	"github.com/nyimbi/afford/internal/sanitize"
 )
 
 type Host struct {

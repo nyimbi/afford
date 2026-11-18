@@ -17,15 +17,15 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"afford/internal/auth"
-	"afford/internal/browser"
-	"afford/internal/check"
-	"afford/internal/config"
-	"afford/internal/history"
-	"afford/internal/model"
-	"afford/internal/report"
-	"afford/internal/run"
-	"afford/internal/store"
+	"github.com/nyimbi/afford/internal/auth"
+	"github.com/nyimbi/afford/internal/browser"
+	"github.com/nyimbi/afford/internal/check"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/history"
+	"github.com/nyimbi/afford/internal/model"
+	"github.com/nyimbi/afford/internal/report"
+	"github.com/nyimbi/afford/internal/run"
+	"github.com/nyimbi/afford/internal/store"
 )
 
 type Server struct {

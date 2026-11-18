@@ -3,7 +3,7 @@ package oracles
 import (
 	"testing"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 func selectWith(name string, options ...model.Option) model.Element {

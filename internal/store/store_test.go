@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 func navFinding(page string) model.Finding {

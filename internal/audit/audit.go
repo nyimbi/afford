@@ -14,8 +14,8 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
-	"afford/internal/model"
-	"afford/sources"
+	"github.com/nyimbi/afford/internal/model"
+	"github.com/nyimbi/afford/sources"
 )
 
 // InitScript records promise rejections nothing handled. It must be installed

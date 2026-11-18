@@ -18,7 +18,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"afford/internal/config"
+	"github.com/nyimbi/afford/internal/config"
 )
 
 // Key identifies a baseline: the route template plus the viewport. Instances of

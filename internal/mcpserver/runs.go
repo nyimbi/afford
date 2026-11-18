@@ -11,9 +11,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"afford/internal/history"
-	"afford/internal/model"
-	"afford/internal/report"
+	"github.com/nyimbi/afford/internal/history"
+	"github.com/nyimbi/afford/internal/model"
+	"github.com/nyimbi/afford/internal/report"
 )
 
 type listRunsIn struct {

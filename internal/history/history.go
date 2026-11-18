@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 // Entry is one run.

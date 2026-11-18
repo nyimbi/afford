@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"afford/internal/config"
+	"github.com/nyimbi/afford/internal/config"
 )
 
 // Route is one URL with the source that named it.

@@ -11,7 +11,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 type Config struct {

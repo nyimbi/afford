@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"afford/internal/config"
+	"github.com/nyimbi/afford/internal/config"
 )
 
 func encode(t *testing.T, img image.Image) []byte {

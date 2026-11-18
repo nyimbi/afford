@@ -7,8 +7,8 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
-	"afford/internal/config"
-	"afford/internal/store"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/store"
 )
 
 func TestVisitSafelyRecoversAndRecordsFinding(t *testing.T) {

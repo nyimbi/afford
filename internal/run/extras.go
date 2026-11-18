@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"sort"
 
-	"afford/internal/auth"
-	"afford/internal/browser"
-	"afford/internal/discover"
-	"afford/internal/model"
-	"afford/internal/probe"
-	"afford/internal/routes"
+	"github.com/nyimbi/afford/internal/auth"
+	"github.com/nyimbi/afford/internal/browser"
+	"github.com/nyimbi/afford/internal/discover"
+	"github.com/nyimbi/afford/internal/model"
+	"github.com/nyimbi/afford/internal/probe"
+	"github.com/nyimbi/afford/internal/routes"
 )
 
 func matchAny(patterns []string, raw string) bool {

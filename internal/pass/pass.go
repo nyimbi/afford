@@ -8,12 +8,12 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
-	"afford/internal/audit"
-	"afford/internal/browser"
-	"afford/internal/config"
-	"afford/internal/model"
-	"afford/internal/oracles"
-	"afford/internal/probe"
+	"github.com/nyimbi/afford/internal/audit"
+	"github.com/nyimbi/afford/internal/browser"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/model"
+	"github.com/nyimbi/afford/internal/oracles"
+	"github.com/nyimbi/afford/internal/probe"
 )
 
 // Visible filters a scan to controls a user could see.

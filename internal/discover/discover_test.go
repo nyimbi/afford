@@ -3,7 +3,7 @@ package discover
 import (
 	"testing"
 
-	"afford/internal/config"
+	"github.com/nyimbi/afford/internal/config"
 )
 
 func TestNormalize(t *testing.T) {

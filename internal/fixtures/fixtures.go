@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"afford/internal/config"
+	"github.com/nyimbi/afford/internal/config"
 )
 
 // Hooks runs setup and teardown for one run.

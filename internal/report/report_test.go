@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 func finding(code, page string, severity model.Severity) model.Finding {

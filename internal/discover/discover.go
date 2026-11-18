@@ -10,8 +10,8 @@ import (
 
 	"github.com/mxschmitt/playwright-go"
 
-	"afford/internal/config"
-	"afford/internal/model"
+	"github.com/nyimbi/afford/internal/config"
+	"github.com/nyimbi/afford/internal/model"
 )
 
 var tracking = map[string]bool{
