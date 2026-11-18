@@ -1,6 +1,6 @@
 # afford
 
-**Find the buttons that do nothing.**
+**Automated verification for the buttons that do nothing.**
 
 afford drives a real browser through your running web app, uses every control it
 can reach, and reports the ones that break: the button with no handler, the link
@@ -28,7 +28,7 @@ and records what happened to each action. An action that completes with no
 navigation, no dialog, no DOM change and no request is a finding, and on most
 codebases it is the highest-value one the tool produces.
 
-It is built to survive a real codebase:
+It is automated verification that survives a real codebase:
 
 - A no-op is re-probed before it is called a defect, so a flaky click does not
   wake anyone up.
