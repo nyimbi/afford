@@ -30,7 +30,8 @@ import (
 	"github.com/nyimbi/afford/internal/store"
 )
 
-const version = "0.1.0"
+// version is overridden at release time: -ldflags "-X main.version=X.Y.Z".
+var version = "0.1.0"
 
 var levels = []model.Severity{model.Blocker, model.Critical, model.Major, model.Minor, model.Info}
 

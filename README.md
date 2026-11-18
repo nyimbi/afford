@@ -22,6 +22,10 @@ and records what happened to each action. An action that completes with no
 navigation, no dialog, no DOM change and no request is a finding, and on most
 codebases it is the highest-value one the tool produces.
 
+Prebuilt binaries for Linux (x86-64, arm64), macOS (Intel, Apple silicon) and
+Windows (x86-64) are on the [releases page](https://github.com/nyimbi/afford/releases),
+with SHA-256 checksums.
+
 ## Requirements
 
 - Go 1.27.4 or newer. Standard library plus Playwright-Go, no cgo.

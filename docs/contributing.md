@@ -306,6 +306,19 @@ Prose in docs and commit messages follows the same rules as the code comments:
 concrete, active voice, sentence case headings, no em dashes, no filler. Say what
 the thing does and what it costs.
 
+## Releasing
+
+```sh
+git tag -a v0.2.0 -m "afford 0.2.0" && git push origin v0.2.0
+make release VERSION=v0.2.0            # or: scripts/release.sh v0.2.0 notes.md
+```
+
+`scripts/release.sh` builds the five platform archives from a clean tree, writes
+`checksums.txt`, and creates the GitHub release on the pushed tag. The version
+reaches the binary through `-ldflags`, so `afford version` cannot disagree with
+the tag. `--dry-run` packages without uploading. There is no hosted build: the
+artifacts come from the machine that made the tag.
+
 ## Commits
 
 Commit a unit at a time. Run `gofmt`, `go test ./...` and `make canary` before
