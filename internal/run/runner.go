@@ -450,8 +450,8 @@ func (r *Runner) debug(pageURL, contextKind string, obs model.Observation, el *m
 	if el != nil {
 		element = el.Tag + " " + el.Name
 	}
-	fmt.Fprintf(os.Stderr, "[debug] %-9s %-30s effect=%-9s err=%q pageerrors=%d requests=%d %s\n",
-		contextKind, pageURL, obs.Effect, obs.ActionError, len(obs.PageErrors), len(obs.Requests), element)
+	fmt.Fprintf(os.Stderr, "[debug] %-9s %-30s dur=%5dms effect=%-9s err=%q pageerrors=%d requests=%d %s\n",
+		contextKind, pageURL, obs.DurationMS, obs.Effect, obs.ActionError, len(obs.PageErrors), len(obs.Requests), element)
 }
 
 func (r *Runner) emit(pageURL, kind, payload string, obs model.Observation, contextKind string, el *model.Element) {

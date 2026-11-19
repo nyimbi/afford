@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/nyimbi/afford/internal/auth"
 	"github.com/nyimbi/afford/internal/browser"
@@ -74,6 +76,16 @@ func (r *Runner) visited() []string {
 // viewportPass revisits every page at each extra viewport. Capture only: no
 // control is clicked, so the pass costs a load per page per viewport.
 func (r *Runner) viewportPass() {
+	if len(r.cfg.Run.Viewports) == 0 {
+		return
+	}
+	started := time.Now()
+	defer func() {
+		if r.debugOn() {
+			fmt.Fprintf(os.Stderr, "[debug] viewport pass %d page(s) in %dms\n",
+				len(r.pagesSeen)*len(r.cfg.Run.Viewports), time.Since(started).Milliseconds())
+		}
+	}()
 	for _, vp := range r.cfg.Run.Viewports {
 		if len(vp) != 2 || r.ctx.Err() != nil {
 			continue
@@ -173,6 +185,16 @@ func subtract(a, b []string) []string {
 // it). A page that loads for both roles with different controls is an
 // E_ROLE_AFFORDANCE_DIFF, an informational record of what each role is offered.
 func (r *Runner) rolePass() {
+	if len(r.cfg.Auth.Profiles) == 0 {
+		return
+	}
+	started := time.Now()
+	defer func() {
+		if r.debugOn() {
+			fmt.Fprintf(os.Stderr, "[debug] role pass %d profile(s) in %dms\n",
+				len(r.cfg.Auth.Profiles), time.Since(started).Milliseconds())
+		}
+	}()
 	for _, prof := range r.cfg.Auth.Profiles {
 		if r.ctx.Err() != nil {
 			return
