@@ -62,12 +62,13 @@ falsify = { file = "internal/mcpserver/mcpserver.go", find = "Name: \"inspect_pa
 
 # The canary is the gate. It starts fixtures/canary, runs afford, and asserts
 # every planted defect in fixtures/canary/GROUND_TRUTH.md is found while the
-# control pages stay clean. Four full crawls of the fixture dominate: at eight
-# workers one crawl measured 388s against 622s at the default three, and a full
-# canary measured 1872s on 2026-11-19 against 2835s at three. The bound stays
-# 5400 for slower machines: a control run over the declared timeout is reported
-# UNPROVEN by --falsify, which is what happened at 1800. Run it with --only
-# canary.
+# control pages stay clean. Four full crawls of the fixture dominate: one crawl
+# measured 179s on 2026-11-20 at eight workers, after probe reloads stopped
+# scrolling to load and probe actions stopped waiting for networkidle, and a
+# full canary measured 968s against 1872s before those two changes and 2835s at
+# three workers. The bound stays 5400 for slower machines: a control run over
+# the declared timeout is reported UNPROVEN by --falsify, which is what happened
+# at 1800. Run it with --only canary.
 [[gates]]
 name = "canary"
 run = "make canary"

@@ -875,6 +875,10 @@ recorded.
 | `E_UPLOAD_FAILED` | Fixture missing or browser refused the file | Check `[uploads]`; run with `--headful` |
 | CI passes when the app is down | You used `--fail-on never` | Use the default, or `critical` |
 
+## How long a run takes
+
+Cost scales with the number of controls, not pages: every control is clicked from a fresh page load, and every action waits for the page's DOM signature and request count to stop changing. On a fixture with 29 pages and 483 controls, one crawl takes about three minutes at the default concurrency and under two at eight workers. Raise `[limits] concurrency` on a fast machine and a staging server; the two extra passes (viewports, roles) use the same bound.
+
 ## Limits and non-goals
 
 afford is a smoke test, not a specification.

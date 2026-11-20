@@ -69,6 +69,19 @@ type FormMeta struct {
 }
 
 func Reset(page playwright.Page, cfg config.Config, url string) Load {
+	return reset(page, cfg, url, true)
+}
+
+// ResetForProbe loads the page for one action. It skips scroll-to-load: the
+// capture pass already scrolled this page and scanned what appeared, and a probe
+// only needs its target located. A control that is genuinely behind lazy loading
+// is found by the fallback in ProbeControl, which pays for the scroll only when
+// the first locate misses.
+func ResetForProbe(page playwright.Page, cfg config.Config, url string) Load {
+	return reset(page, cfg, url, false)
+}
+
+func reset(page playwright.Page, cfg config.Config, url string, scroll bool) Load {
 	started := time.Now()
 	response, err := page.Goto(url, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
@@ -107,7 +120,10 @@ func Reset(page playwright.Page, cfg config.Config, url string) Load {
 	}
 	notReady := browser.SettleReady(page, cfg)
 	settled := time.Since(started).Milliseconds()
-	scrolled, truncated := browser.ScrollToLoad(page, cfg)
+	scrolled, truncated := 0, false
+	if scroll {
+		scrolled, truncated = browser.ScrollToLoad(page, cfg)
+	}
 	status := 0
 	if response != nil {
 		status = response.Status()
@@ -238,7 +254,7 @@ func ProbeControl(
 	popupShotDir string,
 ) model.Observation {
 	collector.Reset()
-	load := Reset(page, cfg, url)
+	load := ResetForProbe(page, cfg, url)
 	if !load.OK {
 		obs := model.Observation{URLBefore: url, URLAfter: page.URL()}
 		obs.ActionError = load.Err.Error()
@@ -251,8 +267,22 @@ func ProbeControl(
 		// A revealed control exists only after its trigger ran; replay it.
 		if vl, _, ok := Locate(page, *el.Via); ok {
 			_, _ = perform(vl, *el.Via, cfg)
-			browser.Settle(page, cfg)
+			browser.SettleAction(page, collector, Signature, cfg)
 		}
+	}
+	locator, pre, ok := Locate(page, el)
+	if !ok {
+		// Not present without scrolling: lazy content. Pay for the scroll, replay
+		// the trigger if the control is revealed, and try once more.
+		browser.ScrollToLoad(page, cfg)
+		browser.Settle(page, cfg)
+		if el.Via != nil {
+			if vl, _, viaOK := Locate(page, *el.Via); viaOK {
+				_, _ = perform(vl, *el.Via, cfg)
+				browser.SettleAction(page, collector, Signature, cfg)
+			}
+		}
+		locator, pre, ok = Locate(page, el)
 	}
 	baseline := collector.SnapshotCopy()
 	beforeURL := page.URL()
@@ -262,13 +292,12 @@ func ProbeControl(
 	actionError := ""
 	obsUploadError := ""
 
-	locator, pre, ok := Locate(page, el)
 	if !ok {
 		actionError = "element not present after reload"
 	} else {
 		occluded = IsOccluded(locator)
 		actionError, obsUploadError = perform(locator, el, cfg)
-		browser.Settle(page, cfg)
+		browser.SettleAction(page, collector, Signature, cfg)
 	}
 
 	afterSig := Signature(page)

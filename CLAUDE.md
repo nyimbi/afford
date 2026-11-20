@@ -29,4 +29,6 @@ Go 1.22+, stdlib plus Playwright-Go. No cgo.
 - Every screenshot goes through `Config.ScreenshotMasks()` (password inputs always masked).
 - CI is `llocal-ci` from `ci.toml` at the repo root; there is no hosted CI and no Dockerfile. Every gate carries a `falsify` mutation, and `require_falsification = true` refuses an unproven gate.
 - MCP run tools (`internal/mcpserver/runs.go`) read `<out>/history.jsonl` and report.json; `get_screenshot` must stay confined to the output directory (`make mcp-smoke` canaries it with `/etc/hosts`).
+- A probe reloads its page (`probe.ResetForProbe`): no scroll-to-load, because the capture pass already scrolled and scanned; `ProbeControl` scrolls and retries when the target is not located, which is the lazy-content path.
+- A probe action settles on the two quantities the oracles read (DOM signature and the collector's request count) holding still across two polls, not on `networkidle` (`browser.SettleAction`). Page-level settles keep `browser.Settle`.
 - gofmt before committing.

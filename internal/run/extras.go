@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/nyimbi/afford/internal/auth"
@@ -90,13 +91,30 @@ func (r *Runner) viewportPass() {
 		if len(vp) != 2 || r.ctx.Err() != nil {
 			continue
 		}
-		for _, u := range r.visited() {
-			if r.ctx.Err() != nil {
-				return
-			}
-			r.captureAt(u, vp)
-		}
+		pages := r.visited()
+		r.parallelPages(len(pages), func(i int) { r.captureAt(pages[i], vp) })
 	}
+}
+
+// parallelPages runs fn for every index with the run's worker bound. The passes
+// are capture-only, each page has its own context, and the findings they add go
+// through the store's lock, so nothing serialises them but the page count.
+func (r *Runner) parallelPages(n int, fn func(i int)) {
+	sem := make(chan struct{}, r.cfg.Limits.Concurrency)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		if r.ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			fn(i)
+		}(i)
+	}
+	wg.Wait()
 }
 
 func (r *Runner) captureAt(u string, vp []int) {
@@ -210,14 +228,13 @@ func (r *Runner) rolePass() {
 			r.bump(r.notTested, "role "+prof.Name+": authentication failed: "+err.Error(), 1)
 			continue
 		}
-		for _, u := range r.visited() {
-			if r.ctx.Err() != nil {
-				return
-			}
+		pages := r.visited()
+		r.parallelPages(len(pages), func(i int) {
+			u := pages[i]
 			loaded, controls := r.loadAs(u, session)
 			if !loaded {
 				r.bump(r.notTested, "role "+prof.Name+": page not available to this role", 1)
-				continue
+				return
 			}
 			if matchAny(prof.Deny, u) {
 				f := model.NewFinding("E_AUTHZ_REACHABLE", u)
@@ -236,7 +253,7 @@ func (r *Runner) rolePass() {
 				f.Detail["only_"+prof.Name] = onlyProfile
 				r.store.AddFinding(f)
 			}
-		}
+		})
 	}
 }
 

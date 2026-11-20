@@ -311,6 +311,36 @@ func SettleReady(page playwright.Page, cfg config.Config) []string {
 	return problems
 }
 
+// SettleAction ends one probe action. A probe acts on a page that has already
+// settled, so waiting for networkidle again buys nothing and pays Playwright's
+// 500ms quiet window on every action. Instead it polls the two quantities the
+// oracles read: the DOM signature and the number of requests the collector has
+// seen. When both hold still across two polls, the effect classification cannot
+// change, so the probe is done. Bounded, and it never returns before the load
+// event.
+func SettleAction(page playwright.Page, collector *Collector, signature func(playwright.Page) string, cfg config.Config) {
+	_ = page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+		State:   playwright.LoadStateLoad,
+		Timeout: playwright.Float(math.Min(1000, float64(cfg.Limits.NavigationTimeoutMS))),
+	})
+	prevSig, prevEvents := "", -1
+	for i := 0; i < 10; i++ {
+		events := 0
+		if collector != nil {
+			events = collector.SnapshotCopy().RequestCount
+		}
+		sig := ""
+		if signature != nil {
+			sig = signature(page)
+		}
+		if sig == prevSig && events == prevEvents {
+			return
+		}
+		prevSig, prevEvents = sig, events
+		page.WaitForTimeout(100)
+	}
+}
+
 func settleHeuristic(page playwright.Page, cfg config.Config) {
 	errLoad := page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 		State:   playwright.LoadStateLoad,

@@ -516,6 +516,15 @@ differs across operating systems, so a baseline produced on macOS will fail on
 Linux for reasons unrelated to the application. The docs say to seed and compare
 in the same environment.
 
+## Probe cost
+
+A probe is one action on a freshly loaded page, so the reload is paid once per control. Two rules keep that affordable:
+
+- `probe.ResetForProbe` loads without scroll-to-load. The capture pass already scrolled this page and scanned what appeared; a probe only needs its target located. `ProbeControl` scrolls and retries once when the first locate misses, which is the lazy-content path paying for itself.
+- `browser.SettleAction` ends an action when the two quantities the oracles read stop changing: the DOM signature (innerText plus element count) and the collector's request count, held still across two polls of 100ms, bounded at 1s. Waiting for `networkidle` after every action instead costs Playwright's 500ms quiet window per probe. Page-level settles (capture, scroll fallback, popups) still use `browser.Settle`.
+
+The viewport and role passes run through the same worker bound as the crawl (`parallelPages`); they were serial before and accounted for a third of a crawl's wall time.
+
 ## Extra passes
 
 After the link crawl, `internal/run/extras.go` runs passes that load pages but never click:
